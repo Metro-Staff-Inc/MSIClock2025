@@ -1,0 +1,31 @@
+{
+  "soap": {
+    "username": "SG360WolfMainLeft",
+    "password": "summer2014",
+    "endpoint": "http://msiwebtrax.com/",
+    "timeout": 30
+  },
+  "camera": {
+    "deviceId": 0,
+    "captureQuality": 85,
+    "resolution": {
+      "width": 640,
+      "height": 360
+    }
+  },
+  "ui": {
+    "fullscreen": true,
+    "language": "en",
+    "adminShortcut": "<Control-Alt-a>"
+  },
+  "storage": {
+    "retentionDays": 30,
+    "dbPath": "data/local.db",
+    "maxOfflineRecords": 10000
+  },
+  "logging": {
+    "level": "INFO",
+    "maxSize": 10485760,
+    "backupCount": 5
+  }
+}
