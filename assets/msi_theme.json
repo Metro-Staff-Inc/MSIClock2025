@@ -127,17 +127,38 @@
   },
   "CTkFont": {
     "macOS": {
-      "family": "SF Display",
+      "family": ["assets/fonts/Roboto-Regular.ttf", "Roboto", "SF Display"],
       "size": 13,
       "weight": "normal"
     },
     "Windows": {
-      "family": "Roboto",
+      "family": ["assets/fonts/Roboto-Regular.ttf", "Roboto", "Segoe UI"],
       "size": 13,
       "weight": "normal"
     },
     "Linux": {
-      "family": "Roboto",
+      "family": ["assets/fonts/Roboto-Regular.ttf", "Roboto", "Ubuntu"],
+      "size": 13,
+      "weight": "normal"
+    }
+  },
+  "CTkFontSecondary": {
+    "macOS": {
+      "family": [
+        "assets/fonts/OpenSans-Regular.ttf",
+        "Open Sans",
+        "SF Display"
+      ],
+      "size": 13,
+      "weight": "normal"
+    },
+    "Windows": {
+      "family": ["assets/fonts/OpenSans-Regular.ttf", "Open Sans", "Segoe UI"],
+      "size": 13,
+      "weight": "normal"
+    },
+    "Linux": {
+      "family": ["assets/fonts/OpenSans-Regular.ttf", "Open Sans", "Ubuntu"],
       "size": 13,
       "weight": "normal"
     }

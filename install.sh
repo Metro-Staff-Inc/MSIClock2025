@@ -24,6 +24,17 @@ mkdir -p logs
 mkdir -p photos
 mkdir -p data
 
+echo "Setting up fonts..."
+# Create user fonts directory if it doesn't exist
+mkdir -p /home/$USERNAME/.fonts
+
+# Copy fonts to user's fonts directory
+cp assets/fonts/Roboto-Regular.ttf /home/$USERNAME/.fonts/
+cp assets/fonts/OpenSans-Regular.ttf /home/$USERNAME/.fonts/
+
+# Update font cache
+fc-cache -f -v
+
 echo "Setting permissions..."
 chown -R $USERNAME:$USERNAME .
 chmod 755 main.py

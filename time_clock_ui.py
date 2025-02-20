@@ -11,15 +11,59 @@ from ui_theme import StatusColors
 
 logger = logging.getLogger(__name__)
 
-class TimerLabel(customtkinter.CTkLabel):
-    """Label that displays current time"""
+class TimerLabel(customtkinter.CTkFrame):
+    """Frame that displays date and time"""
     def __init__(self, parent):
-        super().__init__(parent, font=('Arial', 36))
+        super().__init__(parent)
+        
+        # Create date label
+        self.date_label = customtkinter.CTkLabel(
+            self,
+            text="",
+            font=('Roboto', 24)
+        )
+        self.date_label.pack(pady=(0, 10))
+        
+        # Create a frame to hold time and AM/PM horizontally
+        time_frame = customtkinter.CTkFrame(self, fg_color="transparent")
+        time_frame.pack(pady=(0, 10))
+        
+        # Create time label with larger, bold font
+        self.time_label = customtkinter.CTkLabel(
+            time_frame,
+            text="",
+            font=('Roboto', 72, 'bold')
+        )
+        self.time_label.pack(side="left", padx=(0, 10))
+        
+        # Create smaller AM/PM label
+        self.ampm_label = customtkinter.CTkLabel(
+            time_frame,
+            text="",
+            font=('Roboto', 36, 'bold'),
+            anchor="s"  # Align to bottom
+        )
+        self.ampm_label.pack(side="left", padx=(0, 0), pady=(35, 0))  # Add top padding to align with bottom of clock
+        
         self.update_time()
 
     def update_time(self):
-        current_time = datetime.now().strftime("%I:%M:%S %p")
-        self.configure(text=current_time)
+        now = datetime.now()
+        
+        # Update date (Day of Week, Month Date, Year)
+        date_str = now.strftime("%A, %B %d, %Y")
+        self.date_label.configure(text=date_str)
+        
+        # Format hour without leading zero, minute and seconds with leading zero
+        hour = str(int(now.strftime("%I")))  # Remove leading zero
+        minute = now.strftime("%M")
+        seconds = now.strftime("%S")
+        ampm = now.strftime("%p")
+        
+        # Update time and AM/PM separately
+        self.time_label.configure(text=f"{hour}:{minute}:{seconds}")
+        self.ampm_label.configure(text=ampm)
+        
         self.after(1000, self.update_time)
 
 class CameraPreview(customtkinter.CTkFrame):
@@ -83,7 +127,7 @@ class CameraPreview(customtkinter.CTkFrame):
                     self.canvas.winfo_height() // 2,
                     text="Camera Error\nNo image available",
                     fill=StatusColors.ERROR,
-                    font=('Arial', 14),
+                    font=('Roboto', 14),
                     justify="center"
                 )
         except Exception as e:
@@ -94,7 +138,7 @@ class CameraPreview(customtkinter.CTkFrame):
                 self.canvas.winfo_height() // 2,
                 text=f"Camera Error\n{str(e)}",
                 fill=StatusColors.ERROR,
-                font=('Arial', 14),
+                font=('Roboto', 14),
                 justify="center"
             )
         
@@ -147,52 +191,59 @@ class TimeClockUI(customtkinter.CTkFrame):
             raise
 
     def create_widgets(self):
+        # Configure grid weights for main frame
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)  # Make camera row expandable
+        
         # Main container with padding
         main_container = customtkinter.CTkFrame(self)
-        main_container.pack(fill="both", expand=True, padx=20, pady=20)
+        main_container.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
+        
+        # Configure grid weights for main container
+        main_container.grid_columnconfigure(0, weight=1)
+        main_container.grid_rowconfigure(2, weight=1)  # Camera row
         
         # Top section with time
         self.timer_label = TimerLabel(main_container)
-        self.timer_label.pack(pady=(0, 20))
-        
-        # Middle section with status and camera
-        middle_frame = customtkinter.CTkFrame(main_container)
-        middle_frame.pack(fill="both", expand=True)
+        self.timer_label.grid(row=0, column=0, pady=(0, 20), sticky="ew")
         
         # Status labels (English and Spanish)
-        status_frame = customtkinter.CTkFrame(middle_frame)
-        status_frame.pack(fill="x", pady=(0, 10))
+        status_frame = customtkinter.CTkFrame(main_container, fg_color="transparent")
+        status_frame.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        status_frame.grid_columnconfigure(0, weight=1)
         
         self.status_label = customtkinter.CTkLabel(
             status_frame,
             textvariable=self.status_text,
-            font=('Arial', 24)
+            font=('Roboto', 24)
         )
-        self.status_label.pack()
+        self.status_label.grid(row=0, column=0, sticky="ew")
         
         self.status_label_es = customtkinter.CTkLabel(
             status_frame,
             textvariable=self.status_text_es,
-            font=('Arial', 24)
+            font=('Roboto', 24)
         )
-        self.status_label_es.pack()
+        self.status_label_es.grid(row=1, column=0, sticky="ew")
         
         # Camera preview
-        self.camera_preview = CameraPreview(middle_frame, self.camera_service)
-        self.camera_preview.pack(pady=10)
+        self.camera_preview = CameraPreview(main_container, self.camera_service)
+        self.camera_preview.grid(row=2, column=0, sticky="nsew", pady=10)
         
         # Bottom section with ID entry
-        bottom_frame = customtkinter.CTkFrame(main_container)
-        bottom_frame.pack(fill="x", pady=(20, 0))
+        bottom_frame = customtkinter.CTkFrame(main_container, fg_color="transparent")
+        bottom_frame.grid(row=3, column=0, sticky="ew", pady=(20, 0))
+        bottom_frame.grid_columnconfigure(0, weight=1)
         
         # Hidden entry for ID
         self.id_entry = customtkinter.CTkEntry(
             bottom_frame,
             textvariable=self.employee_id,
-            font=('Arial', 14, 'bold'),
+            font=('Open Sans', 14, 'bold'),
             justify="center",
+            width=200  # Set fixed width for better centering
         )
-        self.id_entry.pack()
+        self.id_entry.grid(row=0, column=0)
         
         # Bind Return key using correct customtkinter syntax
         self.id_entry.bind(sequence="<Return>", command=self.process_punch)
