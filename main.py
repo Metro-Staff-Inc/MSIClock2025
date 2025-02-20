@@ -1,15 +1,15 @@
 import os
 import sys
 import logging
-import tkinter as tk
+import customtkinter
 from tkinter import messagebox
 from datetime import datetime
 import json
 from time_clock_ui import TimeClockUI
-from admin_panel import AdminLoginDialog, AdminPanel
+from admin_panel import show_admin_login, AdminPanel
 from soap_client import SoapClient
 from camera_service import CameraService
-from ui_constants import Colors
+from ui_theme import setup_theme
 
 # Configure logging
 def setup_logging():
@@ -141,15 +141,21 @@ class TimeClock:
             sys.exit(1)
 
     def setup_root_window(self):
-        self.root = tk.Tk()
+        # Setup theme before creating window
+        setup_theme()
+        
+        self.root = customtkinter.CTk()
         self.root.title("MSI Time Clock")
         
-        # Configure window
-        self.root.configure(background=Colors.WHITE)
+        # Force 800x600 for testing
+        self.root.geometry("800x600")
+        self.root.resizable(False, False)  # Prevent resizing
         
+        '''
         # Set fullscreen
         if self.settings['ui']['fullscreen']:
             self.root.attributes('-fullscreen', True)
+        '''
             
         # Prevent alt+f4
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -181,7 +187,7 @@ class TimeClock:
     def create_ui(self):
         # Create main UI
         self.time_clock_ui = TimeClockUI(self.root)
-        self.time_clock_ui.pack(fill=tk.BOTH, expand=True)
+        self.time_clock_ui.pack(fill="both", expand=True)
 
     def schedule_tasks(self):
         # Schedule periodic tasks
@@ -240,7 +246,7 @@ class TimeClock:
             if success:
                 AdminPanel(self.root)
         
-        AdminLoginDialog(self.root, on_login)
+        show_admin_login(self.root, on_login)
 
     def on_closing(self):
         """Handle window close attempt"""
@@ -279,5 +285,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

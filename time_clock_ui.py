@@ -1,5 +1,4 @@
-import tkinter as tk
-from tkinter import ttk
+import customtkinter
 import cv2
 from PIL import Image, ImageTk
 import logging
@@ -8,14 +7,14 @@ from typing import Optional, Callable
 import json
 from camera_service import CameraService
 from soap_client import SoapClient
-from ui_constants import Colors
+from ui_theme import StatusColors
 
 logger = logging.getLogger(__name__)
 
-class TimerLabel(ttk.Label):
+class TimerLabel(customtkinter.CTkLabel):
     """Label that displays current time"""
     def __init__(self, parent):
-        super().__init__(parent, font=('Arial', 36), foreground=Colors.BLACK)
+        super().__init__(parent, font=('Arial', 36))
         self.update_time()
 
     def update_time(self):
@@ -23,7 +22,7 @@ class TimerLabel(ttk.Label):
         self.configure(text=current_time)
         self.after(1000, self.update_time)
 
-class CameraPreview(ttk.Frame):
+class CameraPreview(customtkinter.CTkFrame):
     """Frame that shows camera preview"""
     def __init__(self, parent, camera_service: CameraService):
         super().__init__(parent)
@@ -31,11 +30,10 @@ class CameraPreview(ttk.Frame):
         self.preview_active = False
         
         # Create canvas for preview
-        self.canvas = tk.Canvas(
+        self.canvas = customtkinter.CTkCanvas(
             self,
             width=self.camera_service.settings['camera']['resolution']['width'],
-            height=self.camera_service.settings['camera']['resolution']['height'],
-            background=Colors.WHITE
+            height=self.camera_service.settings['camera']['resolution']['height']
         )
         self.canvas.pack()
         
@@ -75,7 +73,7 @@ class CameraPreview(ttk.Frame):
                 
                 # Update canvas
                 self.canvas.delete("all")
-                self.canvas.create_image(0, 0, image=photo, anchor=tk.NW)
+                self.canvas.create_image(0, 0, image=photo, anchor="nw")
                 self.current_image = photo  # Keep reference
             else:
                 # Show error message if frame capture failed
@@ -84,9 +82,9 @@ class CameraPreview(ttk.Frame):
                     self.canvas.winfo_width() // 2,
                     self.canvas.winfo_height() // 2,
                     text="Camera Error\nNo image available",
-                    fill=Colors.RED,
+                    fill=StatusColors.ERROR,
                     font=('Arial', 14),
-                    justify=tk.CENTER
+                    justify="center"
                 )
         except Exception as e:
             logger.error(f"Error updating preview: {e}")
@@ -95,15 +93,15 @@ class CameraPreview(ttk.Frame):
                 self.canvas.winfo_width() // 2,
                 self.canvas.winfo_height() // 2,
                 text=f"Camera Error\n{str(e)}",
-                fill=Colors.RED,
+                fill=StatusColors.ERROR,
                 font=('Arial', 14),
-                justify=tk.CENTER
+                justify="center"
             )
         
         if self.preview_active:
             self.after(33, self.update_preview)  # ~30 FPS
 
-class TimeClockUI(ttk.Frame):
+class TimeClockUI(customtkinter.CTkFrame):
     def __init__(self, parent, settings_path: str = 'settings.json'):
         super().__init__(parent)
         self.settings = self._load_settings(settings_path)
@@ -112,9 +110,9 @@ class TimeClockUI(ttk.Frame):
         self.camera_service = CameraService(settings_path)
         self.soap_client = SoapClient(settings_path)
         
-        self.employee_id = tk.StringVar()
-        self.status_text = tk.StringVar()
-        self.status_text_es = tk.StringVar()
+        self.employee_id = customtkinter.StringVar()
+        self.status_text = customtkinter.StringVar()
+        self.status_text_es = customtkinter.StringVar()
         
         self.create_widgets()
         
@@ -122,23 +120,23 @@ class TimeClockUI(ttk.Frame):
         self.camera_service.initialize()
         self.camera_preview.start_preview()
         
-        # Bind keyboard input to both parent and self
-        self.bind_all('<Key>', self.on_key_press)
-        self.bind_all('<Return>', self.process_punch)
+        # Bind keyboard input using regular bind
+        self.bind('<Return>', self.process_punch)
+        self.id_entry.bind('<Return>', self.process_punch)
         parent.bind(self.settings['ui']['adminShortcut'], self.show_admin_panel)
         
-        # Initialize UI state
-        self.reset_ui()
+        # Initialize UI state after widget is fully created
+        self.after(100, self.reset_ui)
 
     def show_admin_panel(self, event=None):
         """Show the admin panel"""
-        from admin_panel import AdminLoginDialog, AdminPanel
+        from admin_panel import show_admin_login, AdminPanel
         
         def on_login(success: bool):
             if success:
                 AdminPanel(self.winfo_toplevel())
         
-        AdminLoginDialog(self.winfo_toplevel(), on_login)
+        show_admin_login(self.winfo_toplevel(), on_login)
 
     def _load_settings(self, settings_path: str) -> dict:
         try:
@@ -149,42 +147,33 @@ class TimeClockUI(ttk.Frame):
             raise
 
     def create_widgets(self):
-        # Configure style
-        style = ttk.Style()
-        style.configure('Clock.TFrame', background=Colors.WHITE)
-        
         # Main container with padding
-        main_container = ttk.Frame(self, padding="20", style='Clock.TFrame')
-        main_container.pack(fill=tk.BOTH, expand=True)
+        main_container = customtkinter.CTkFrame(self)
+        main_container.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Top section with time
         self.timer_label = TimerLabel(main_container)
         self.timer_label.pack(pady=(0, 20))
         
         # Middle section with status and camera
-        middle_frame = ttk.Frame(main_container)
-        middle_frame.pack(fill=tk.BOTH, expand=True)
+        middle_frame = customtkinter.CTkFrame(main_container)
+        middle_frame.pack(fill="both", expand=True)
         
         # Status labels (English and Spanish)
-        status_frame = ttk.Frame(middle_frame)
-        status_frame.pack(fill=tk.X, pady=(0, 10))
+        status_frame = customtkinter.CTkFrame(middle_frame)
+        status_frame.pack(fill="x", pady=(0, 10))
         
-        # Use tk.Label instead of ttk.Label for better text variable support
-        self.status_label = tk.Label(
+        self.status_label = customtkinter.CTkLabel(
             status_frame,
             textvariable=self.status_text,
-            font=('Arial', 24),
-            fg=Colors.BLACK,
-            bg=Colors.WHITE
+            font=('Arial', 24)
         )
         self.status_label.pack()
         
-        self.status_label_es = tk.Label(
+        self.status_label_es = customtkinter.CTkLabel(
             status_frame,
             textvariable=self.status_text_es,
-            font=('Arial', 24),
-            fg=Colors.BLACK,
-            bg=Colors.WHITE
+            font=('Arial', 24)
         )
         self.status_label_es.pack()
         
@@ -193,35 +182,42 @@ class TimeClockUI(ttk.Frame):
         self.camera_preview.pack(pady=10)
         
         # Bottom section with ID entry
-        bottom_frame = ttk.Frame(main_container)
-        bottom_frame.pack(fill=tk.X, pady=(20, 0))
+        bottom_frame = customtkinter.CTkFrame(main_container)
+        bottom_frame.pack(fill="x", pady=(20, 0))
         
         # Hidden entry for ID
-        self.id_entry = ttk.Entry(
+        self.id_entry = customtkinter.CTkEntry(
             bottom_frame,
             textvariable=self.employee_id,
-            font=('Arial', 14)
+            font=('Arial', 14, 'bold'),
+            justify="center",
         )
         self.id_entry.pack()
-        self.id_entry.bind('<Return>', self.process_punch)
+        
+        # Bind Return key using correct customtkinter syntax
+        self.id_entry.bind(sequence="<Return>", command=self.process_punch)
 
     def reset_ui(self):
         """Reset UI to initial state"""
         self.employee_id.set("")
-        self.set_status("Please scan your ID", "Por favor pase su tarjeta", Colors.BLACK)
+        self.set_status("Please scan your ID", "Por favor pase su tarjeta", StatusColors.NORMAL)
+        # Schedule focus_set after widget is fully rendered
+        self.after(100, lambda: self.id_entry.focus_set())
 
     def set_status(self, text: str, text_es: str, color: str):
         """Update status display"""
         self.status_text.set(text)
         self.status_text_es.set(text_es)
-        self.status_label.configure(fg=color)
-        self.status_label_es.configure(fg=color)
+        self.status_label.configure(text_color=color)
+        self.status_label_es.configure(text_color=color)
         self.update()  # Force update of the UI
 
     def on_key_press(self, event):
         """Handle keyboard input"""
         if event.char.isprintable():
-            self.id_entry.focus()
+            # Append the character to the entry if it's printable
+            current = self.employee_id.get()
+            self.employee_id.set(current + event.char)
 
     def process_punch(self, event=None):
         """Process an employee punch"""
@@ -251,26 +247,26 @@ class TimeClockUI(ttk.Frame):
                 self.set_status(
                     "Punch saved offline",
                     "Datos guardados sin conexión",
-                    Colors.GREY
+                    StatusColors.INACTIVE
                 )
             elif response['success']:
                 if response['punchType'].lower() == 'checkin':
                     self.set_status(
                         f"Welcome {response['firstName']}!",
                         f"¡Bienvenido {response['firstName']}!",
-                        Colors.GREEN
+                        StatusColors.SUCCESS
                     )
                 else:
                     self.set_status(
                         f"Goodbye {response['firstName']}!",
                         f"¡Adiós {response['firstName']}!",
-                        Colors.GREEN
+                        StatusColors.SUCCESS
                     )
             else:
                 self.set_status(
                     "Punch failed - Please try again",
                     "Error - Por favor intente de nuevo",
-                    Colors.RED
+                    StatusColors.ERROR
                 )
             
         except Exception as e:
@@ -278,26 +274,26 @@ class TimeClockUI(ttk.Frame):
             self.set_status(
                 "System Error - Please try again",
                 "Error del sistema - Por favor intente de nuevo",
-                Colors.RED
+                StatusColors.ERROR
             )
         
         finally:
             # Clean up
             self.employee_id.set("")
             
-            # Reset UI after delay
-            self.after(3000, self.reset_ui)
+            # Reset UI and ensure focus after delay
+            def reset_with_focus():
+                self.reset_ui()
+                self.after(100, lambda: self.id_entry.focus_set())
+            self.after(3000, reset_with_focus)
 
 if __name__ == "__main__":
     # Test UI
-    root = tk.Tk()
+    root = customtkinter.CTk()
     root.title("Time Clock")
     
-    # Configure root window
-    root.configure(background=Colors.WHITE)
-    
     app = TimeClockUI(root)
-    app.pack(fill=tk.BOTH, expand=True)
+    app.pack(fill="both", expand=True)
     
     # Configure for fullscreen
     root.attributes('-fullscreen', True)
