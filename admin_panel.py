@@ -9,22 +9,6 @@ from camera_service import CameraService
 logger = logging.getLogger(__name__)
 
 class AdminLoginDialog(tk.Toplevel):
-    def __init__(self, parent, callback: Callable[[bool], None]):
-        super().__init__(parent)
-        self.callback = callback
-        self.title("Admin Login")
-        self.geometry("300x150")
-        self.resizable(False, False)
-        
-        # Center on parent
-        self.transient(parent)
-        self.grab_set()
-        
-        self.password = tk.StringVar()
-        self.create_widgets()
-        
-        # Handle window close button
-        self.protocol("WM_DELETE_WINDOW", self.on_cancel)
 
     def create_widgets(self):
         # Main frame
@@ -47,9 +31,36 @@ class AdminLoginDialog(tk.Toplevel):
         # Bind Enter key to login
         self.bind('<Return>', lambda e: self.on_login())
 
+    def __init__(self, parent, callback: Callable[[bool], None]):
+        super().__init__(parent)
+        self.callback = callback
+        self.title("Admin Login")
+        self.geometry("300x150")
+        self.resizable(False, False)
+        
+        # Load settings
+        try:
+            with open('settings.json', 'r') as f:
+                self.settings = json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load settings: {e}")
+            messagebox.showerror("Error", "Failed to load settings")
+            self.destroy()
+            return
+        
+        # Center on parent
+        self.transient(parent)
+        self.grab_set()
+        
+        self.password = tk.StringVar()
+        self.create_widgets()
+        
+        # Handle window close button
+        self.protocol("WM_DELETE_WINDOW", self.on_cancel)
+
     def on_login(self):
-        # Check against fixed admin password
-        if self.password.get() == "Metro2024!":
+        # Check against password from settings
+        if self.password.get() == self.settings['ui']['adminPassword']:
             self.callback(True)
             self.destroy()
         else:
@@ -111,16 +122,45 @@ class AdminPanel(tk.Toplevel):
         soap_frame = ttk.LabelFrame(settings_frame, text="SOAP Configuration", padding="10")
         soap_frame.pack(fill=tk.X, pady=(0, 10))
         
+        # Client ID
+        ttk.Label(soap_frame, text="Client ID:").grid(row=0, column=0, sticky=tk.W)
+        self.client_id_var = tk.StringVar()
+        ttk.Entry(soap_frame, textvariable=self.client_id_var).grid(row=0, column=1, sticky=tk.EW, padx=5)
+        
         # Username
-        ttk.Label(soap_frame, text="Username:").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(soap_frame, text="Username:").grid(row=1, column=0, sticky=tk.W)
         self.username_var = tk.StringVar()
-        ttk.Entry(soap_frame, textvariable=self.username_var).grid(row=0, column=1, sticky=tk.EW, padx=5)
+        ttk.Entry(soap_frame, textvariable=self.username_var).grid(row=1, column=1, sticky=tk.EW, padx=5)
         
         # Password
-        ttk.Label(soap_frame, text="Password:").grid(row=1, column=0, sticky=tk.W)
+        ttk.Label(soap_frame, text="Password:").grid(row=2, column=0, sticky=tk.W)
         self.password_var = tk.StringVar()
-        ttk.Entry(soap_frame, textvariable=self.password_var, show="*").grid(row=1, column=1, sticky=tk.EW, padx=5)
+        ttk.Entry(soap_frame, textvariable=self.password_var,).grid(row=2, column=1, sticky=tk.EW, padx=5)
         
+        # Admin Settings
+        admin_frame = ttk.LabelFrame(settings_frame, text="Admin Configuration", padding="10")
+        admin_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # New Admin Password
+        ttk.Label(admin_frame, text="New Password:").grid(row=0, column=0, sticky=tk.W)
+        self.new_password_var = tk.StringVar()
+        password_frame = ttk.Frame(admin_frame)
+        password_frame.grid(row=0, column=1, sticky=tk.EW, padx=5)
+        self.new_password_entry = ttk.Entry(password_frame, textvariable=self.new_password_var, show="*")
+        self.new_password_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(password_frame, text="Show", width=6,
+                   command=lambda: self.toggle_password_visibility(self.new_password_entry)).pack(side=tk.LEFT, padx=(5,0))
+
+        # Confirm Admin Password
+        ttk.Label(admin_frame, text="Confirm Password:").grid(row=1, column=0, sticky=tk.W)
+        self.confirm_password_var = tk.StringVar()
+        confirm_frame = ttk.Frame(admin_frame)
+        confirm_frame.grid(row=1, column=1, sticky=tk.EW, padx=5)
+        self.confirm_password_entry = ttk.Entry(confirm_frame, textvariable=self.confirm_password_var, show="*")
+        self.confirm_password_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(confirm_frame, text="Show", width=6,
+                   command=lambda: self.toggle_password_visibility(self.confirm_password_entry)).pack(side=tk.LEFT, padx=(5,0))
+
         # Storage Settings
         storage_frame = ttk.LabelFrame(settings_frame, text="Storage Configuration", padding="10")
         storage_frame.pack(fill=tk.X, pady=(0, 10))
@@ -199,7 +239,12 @@ class AdminPanel(tk.Toplevel):
         ttk.Button(control_frame, text="Close Program", command=self.close_program, style="Danger.TButton").pack(anchor=tk.W)
 
     def load_current_settings(self):
+        # Load admin settings
+        self.new_password_var.set("")
+        self.confirm_password_var.set("")
+
         # Load SOAP settings
+        self.client_id_var.set(str(self.settings['soap']['clientId']))
         self.username_var.set(self.settings['soap']['username'])
         self.password_var.set(self.settings['soap']['password'])
         
@@ -210,9 +255,28 @@ class AdminPanel(tk.Toplevel):
         self.device_id_var.set(str(self.settings['camera']['deviceId']))
         self.quality_var.set(str(self.settings['camera']['captureQuality']))
 
+    def toggle_password_visibility(self, entry_widget):
+        """Toggle password visibility between shown and hidden"""
+        current_state = entry_widget.cget('show')
+        if current_state == '*':
+            entry_widget.configure(show='')
+        else:
+            entry_widget.configure(show='*')
+
     def save_settings(self):
         try:
-            # Update settings dictionary
+            # Validate admin password change
+            new_password = self.new_password_var.get()
+            confirm_password = self.confirm_password_var.get()
+            
+            if new_password or confirm_password:  # Only validate if either field has content
+                if new_password != confirm_password:
+                    messagebox.showerror("Error", "New password and confirm password do not match")
+                    return
+                self.settings['ui']['adminPassword'] = new_password
+
+            # SOAP settings
+            self.settings['soap']['clientId'] = int(self.client_id_var.get())
             self.settings['soap']['username'] = self.username_var.get()
             self.settings['soap']['password'] = self.password_var.get()
             self.settings['storage']['retentionDays'] = int(self.retention_var.get())

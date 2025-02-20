@@ -14,7 +14,7 @@ read -p "Enter username for service file: " USERNAME
 
 echo "Installing system dependencies..."
 apt-get update
-apt-get install -y python3-tk python3-pip python3-opencv
+apt-get install -y python3-tk python3-pip python3-opencv nvidia-cuda-toolkit
 
 echo "Installing Python dependencies..."
 pip3 install -r requirements.txt

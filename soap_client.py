@@ -65,8 +65,7 @@ class SoapClient:
             logger.error(f"Failed to initialize SOAP clients: {e}")
             raise
 
-    def record_punch(self, employee_id: str, punch_time: datetime, 
-                    image_data: Optional[bytes] = None, 
+    def record_punch(self, employee_id: str, punch_time: datetime,
                     department_override: Optional[int] = None) -> Dict[str, Any]:
         """
         Record a punch for an employee, handling both online and offline scenarios
@@ -91,10 +90,6 @@ class SoapClient:
                         swipeInput=swipe_input
                     )
                 
-                # If we have an image, upload it
-                if image_data and response.RecordSwipeReturnInfo.PunchSuccess:
-                    self._upload_image(employee_id, image_data, punch_time)
-                
                 return self._format_response(response, True)
 
             except (Fault, TransportError, RequestException) as e:
@@ -109,23 +104,37 @@ class SoapClient:
                      punch_time: datetime) -> bool:
         """Upload captured image to the server"""
         try:
-            filename = f"{employee_id}_{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
+            filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
+            client_id = str(self.settings['soap']['clientId'])
             
-            response = self.checkin_client.service.SaveImage(
-                _soapheaders=[self.credentials],
-                fileName=filename,
-                data=image_data,
-                dir="punches"  # Directory on the server
-            )
+            logger.info(f"Attempting to save image: {filename}")
+            logger.info(f"Client ID directory: {client_id}")
             
-            # Check for system error codes
-            if hasattr(response, 'SystemErrorCode'):
-                error_code = response.SystemErrorCode
-                if error_code:
-                    logger.error(f"SaveImage error code: {error_code}")
-                    return False
-            
-            return True if response else False
+            try:
+                response = self.checkin_client.service.SaveImage(
+                    _soapheaders=[self.credentials],
+                    fileName=filename,
+                    data=image_data,
+                    dir=client_id
+                )
+                
+                # Log the raw response for debugging
+                logger.info(f"SaveImage raw response: {response}")
+                
+                # Check for system error codes
+                if hasattr(response, 'SystemErrorCode'):
+                    error_code = response.SystemErrorCode
+                    if error_code:
+                        logger.error(f"SaveImage error code: {error_code}")
+                        return False
+                
+                success = True if response else False
+                logger.info(f"Image upload {'successful' if success else 'failed'}")
+                return success
+                
+            except Exception as e:
+                logger.error(f"SaveImage SOAP call failed: {str(e)}")
+                return False
         except Exception as e:
             logger.error(f"Failed to upload image: {e}")
             return False

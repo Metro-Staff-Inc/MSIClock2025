@@ -5,6 +5,7 @@ from typing import Optional, Tuple, Dict
 from datetime import datetime
 import json
 import os
+from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,60 @@ class CameraService:
         self.settings = self._load_settings(settings_path)
         self.camera = None
         self.is_initialized = False
+        # Initialize YOLO model for person detection
+        try:
+            self.model = YOLO('yolov8n.pt')  # Using the smallest model for faster inference
+            logger.info("YOLO model initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize YOLO model: {e}")
+            self.model = None
+
+    def detect_and_crop_person(self, frame: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Detect a person in the frame and crop to their bounds
+        Returns: Cropped frame containing the person or None if no person detected
+        """
+        if self.model is None:
+            logger.error("YOLO model not initialized")
+            return None
+
+        try:
+            # Run inference
+            results = self.model(frame, conf=0.5)  # Confidence threshold of 0.5
+            
+            # Get person detections (class 0 is person in COCO dataset)
+            person_boxes = []
+            for result in results:
+                for box in result.boxes:
+                    if int(box.cls) == 0:  # Person class
+                        person_boxes.append(box.xyxy[0].cpu().numpy())  # Get box coordinates
+
+            if not person_boxes:
+                logger.warning("No person detected in frame")
+                return frame  # Return original frame if no person detected
+
+            # Use the largest person detection (assuming it's the closest/main subject)
+            largest_box = max(person_boxes, key=lambda box: (box[2]-box[0]) * (box[3]-box[1]))
+            
+            # Add padding around the detection (10% on each side)
+            height, width = frame.shape[:2]
+            x1, y1, x2, y2 = largest_box
+            padding_x = (x2 - x1) * 0.1
+            padding_y = (y2 - y1) * 0.1
+            
+            x1 = max(0, int(x1 - padding_x))
+            y1 = max(0, int(y1 - padding_y))
+            x2 = min(width, int(x2 + padding_x))
+            y2 = min(height, int(y2 + padding_y))
+
+            # Crop the frame to the padded person bounds
+            cropped_frame = frame[y1:y2, x1:x2]
+            
+            return cropped_frame
+
+        except Exception as e:
+            logger.error(f"Error in person detection: {e}")
+            return None
 
     def _load_settings(self, settings_path: str) -> Dict:
         try:
@@ -105,9 +160,35 @@ class CameraService:
             logger.error(f"Error capturing frame: {e}")
             return None
 
-    def capture_photo(self, employee_id: str) -> Optional[bytes]:
+    def _resize_image(self, image: np.ndarray) -> np.ndarray:
         """
-        Capture a photo for an employee punch
+        Resize image if it exceeds max dimensions while maintaining aspect ratio
+        """
+        max_width = self.settings['camera'].get('maxWidth', float('inf'))
+        max_height = self.settings['camera'].get('maxHeight', float('inf'))
+        
+        height, width = image.shape[:2]
+        
+        # Calculate scaling factor if image exceeds max dimensions
+        scale_width = max_width / width if width > max_width else 1
+        scale_height = max_height / height if height > max_height else 1
+        scale = min(scale_width, scale_height)
+        
+        # Only resize if image needs to be scaled down
+        if scale < 1:
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            logger.info(f"Resizing image from {width}x{height} to {new_width}x{new_height}")
+            return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        
+        return image
+
+    def capture_photo(self, employee_id: str, timestamp: Optional[datetime] = None) -> Optional[bytes]:
+        """
+        Capture a photo for an employee punch, detect person and crop
+        Args:
+            employee_id: Employee ID for the photo
+            timestamp: Optional timestamp to use for the filename (defaults to current time)
         Returns: JPEG encoded bytes or None if failed
         """
         try:
@@ -115,14 +196,29 @@ class CameraService:
             if result is None:
                 return None
 
-            frame, jpeg_data = result
+            frame, _ = result
 
-            # Save a local copy for backup
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"photos/{employee_id}_{timestamp}.jpg"
+            # Detect and crop person from frame
+            cropped_frame = self.detect_and_crop_person(frame)
+            if cropped_frame is None:
+                logger.warning("Failed to detect person, using original frame")
+                cropped_frame = frame
+
+            # Resize image if it exceeds max dimensions
+            resized_frame = self._resize_image(cropped_frame)
+
+            # Convert resized frame to JPEG
+            quality = self.settings['camera']['captureQuality']
+            _, buffer = cv2.imencode('.jpg', resized_frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            jpeg_data = buffer.tobytes()
+
+            # Save a local copy for backup using provided timestamp or current time
+            if timestamp is None:
+                timestamp = datetime.now()
+            filename = f"photos/{employee_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
             
             os.makedirs("photos", exist_ok=True)
-            cv2.imwrite(filename, frame)
+            cv2.imwrite(filename, resized_frame)
 
             return jpeg_data
 
@@ -131,7 +227,7 @@ class CameraService:
             return None
 
     def start_preview(self, window_name: str = "Camera Preview") -> bool:
-        """Start a preview window for camera testing"""
+        """Start a preview window for camera testing with person detection"""
         if not self.is_initialized or self.camera is None:
             logger.error("Camera not initialized")
             return False
@@ -143,13 +239,39 @@ class CameraService:
                     break
 
                 frame, _ = result
-                cv2.imshow(window_name, frame)
+                
+                try:
+                    # Show original frame
+                    cv2.imshow(f"{window_name} - Original", frame)
+                    
+                    # Detect and crop person
+                    cropped_frame = self.detect_and_crop_person(frame)
+                    if cropped_frame is not None:
+                        # Resize cropped frame if needed
+                        resized_frame = self._resize_image(cropped_frame)
+                        
+                        # Show dimensions in window title
+                        height, width = resized_frame.shape[:2]
+                        cv2.imshow(f"{window_name} - Processed ({width}x{height})", resized_frame)
 
-                # Break loop on 'q' key
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    # Break loop on 'q' key or window close
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord('q') or cv2.getWindowProperty(f"{window_name} - Original", cv2.WND_PROP_VISIBLE) < 1:
+                        break
+                except cv2.error as e:
+                    logger.error(f"OpenCV error in preview: {e}")
+                    break
+                except Exception as e:
+                    logger.error(f"Error in preview loop: {e}")
                     break
 
-            cv2.destroyWindow(window_name)
+            # Ensure windows are properly closed
+            try:
+                cv2.destroyAllWindows()
+                cv2.waitKey(1)  # This is needed to properly close windows on some systems
+            except Exception as e:
+                logger.error(f"Error closing windows: {e}")
+
             return True
 
         except Exception as e:
@@ -159,13 +281,29 @@ class CameraService:
     def cleanup(self):
         """Release camera resources"""
         try:
+            # Close any remaining windows
+            try:
+                cv2.destroyAllWindows()
+                cv2.waitKey(1)  # Needed to properly close windows on some systems
+            except Exception as e:
+                logger.error(f"Error closing windows: {e}")
+
+            # Release camera
             if self.camera is not None:
-                self.camera.release()
-                self.camera = None
+                try:
+                    self.camera.release()
+                except Exception as e:
+                    logger.error(f"Error releasing camera: {e}")
+                finally:
+                    self.camera = None
+
+            # Reset initialization state
             self.is_initialized = False
             logger.info("Camera resources released")
+
         except Exception as e:
-            logger.error(f"Error cleaning up camera: {e}")
+            logger.error(f"Error in cleanup: {e}")
+            raise  # Re-raise the exception for proper error handling
 
     def __enter__(self):
         """Context manager entry"""

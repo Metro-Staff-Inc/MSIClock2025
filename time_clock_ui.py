@@ -117,12 +117,18 @@ class TimeClockUI(ttk.Frame):
         self.status_text_es = tk.StringVar()
         
         self.create_widgets()
-        self.reset_ui()
         
-        # Bind keyboard input
-        parent.bind('<Key>', self.on_key_press)
-        parent.bind('<Return>', self.process_punch)
+        # Start camera preview
+        self.camera_service.initialize()
+        self.camera_preview.start_preview()
+        
+        # Bind keyboard input to both parent and self
+        self.bind_all('<Key>', self.on_key_press)
+        self.bind_all('<Return>', self.process_punch)
         parent.bind(self.settings['ui']['adminShortcut'], self.show_admin_panel)
+        
+        # Initialize UI state
+        self.reset_ui()
 
     def show_admin_panel(self, event=None):
         """Show the admin panel"""
@@ -163,19 +169,22 @@ class TimeClockUI(ttk.Frame):
         status_frame = ttk.Frame(middle_frame)
         status_frame.pack(fill=tk.X, pady=(0, 10))
         
-        self.status_label = ttk.Label(
+        # Use tk.Label instead of ttk.Label for better text variable support
+        self.status_label = tk.Label(
             status_frame,
             textvariable=self.status_text,
             font=('Arial', 24),
-            foreground=Colors.BLACK
+            fg=Colors.BLACK,
+            bg=Colors.WHITE
         )
         self.status_label.pack()
         
-        self.status_label_es = ttk.Label(
+        self.status_label_es = tk.Label(
             status_frame,
             textvariable=self.status_text_es,
             font=('Arial', 24),
-            foreground=Colors.BLACK
+            fg=Colors.BLACK,
+            bg=Colors.WHITE
         )
         self.status_label_es.pack()
         
@@ -200,14 +209,14 @@ class TimeClockUI(ttk.Frame):
         """Reset UI to initial state"""
         self.employee_id.set("")
         self.set_status("Please scan your ID", "Por favor pase su tarjeta", Colors.BLACK)
-        self.camera_preview.stop_preview()
 
     def set_status(self, text: str, text_es: str, color: str):
         """Update status display"""
         self.status_text.set(text)
         self.status_text_es.set(text_es)
-        self.status_label.configure(foreground=color)
-        self.status_label_es.configure(foreground=color)
+        self.status_label.configure(fg=color)
+        self.status_label_es.configure(fg=color)
+        self.update()  # Force update of the UI
 
     def on_key_press(self, event):
         """Handle keyboard input"""
@@ -221,19 +230,21 @@ class TimeClockUI(ttk.Frame):
             return
         
         try:
-            # Start camera preview
-            self.camera_service.initialize()
-            self.camera_preview.start_preview()
+            # Get current time once to use for both punch and photo
+            punch_time = datetime.now()
             
-            # Capture photo
-            photo_data = self.camera_service.capture_photo(employee_id)
+            # Capture photo first with the timestamp
+            photo_data = self.camera_service.capture_photo(employee_id, punch_time)
             
-            # Record punch
+            # Record punch with same timestamp
             response = self.soap_client.record_punch(
                 employee_id=employee_id,
-                punch_time=datetime.now(),
-                image_data=photo_data
+                punch_time=punch_time
             )
+            
+            # If punch was successful, upload the photo with same timestamp
+            if response['success'] and photo_data:
+                self.soap_client._upload_image(employee_id, photo_data, punch_time)
             
             # Handle response
             if response['offline']:
@@ -273,8 +284,6 @@ class TimeClockUI(ttk.Frame):
         finally:
             # Clean up
             self.employee_id.set("")
-            self.camera_preview.stop_preview()
-            self.camera_service.cleanup()
             
             # Reset UI after delay
             self.after(3000, self.reset_ui)

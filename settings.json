@@ -1,9 +1,10 @@
 {
   "soap": {
-    "username": "SG360WolfMainLeft",
+    "username": "SG360WolfMainRight",
     "password": "summer2014",
     "endpoint": "http://msiwebtrax.com/",
-    "timeout": 30
+    "timeout": 30,
+    "clientId": 309
   },
   "camera": {
     "deviceId": 0,
@@ -11,12 +12,15 @@
     "resolution": {
       "width": 640,
       "height": 360
-    }
+    },
+    "maxWidth": 320,
+    "maxHeight": 320
   },
   "ui": {
     "fullscreen": true,
     "language": "en",
-    "adminShortcut": "<Control-Alt-a>"
+    "adminShortcut": "<Control-Alt-a>",
+    "adminPassword": "12345678"
   },
   "storage": {
     "retentionDays": 30,

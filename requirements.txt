@@ -6,6 +6,8 @@ requests>=2.31.0    # HTTP client for SOAP
 lxml>=4.9.3         # XML processing for SOAP
 urllib3>=2.0.0      # HTTP client
 pywin32>=306; platform_system == "Windows"  # Windows-specific features
+ultralytics>=8.0.0  # YOLOv8 for person detection
+customtkinter>=5.2.2  # Modern UI framework
 
 # Build dependencies
 pyinstaller>=6.3.0  # Creating executable

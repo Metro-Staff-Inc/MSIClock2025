@@ -78,7 +78,8 @@ class TimeClock:
                 "username": "",
                 "password": "",
                 "endpoint": "http://msiwebtrax.com/",
-                "timeout": 30
+                "timeout": 30,
+                "clientId": 185
             },
             "camera": {
                 "deviceId": 0,
@@ -91,7 +92,8 @@ class TimeClock:
             "ui": {
                 "fullscreen": True,
                 "language": "en",
-                "adminShortcut": "ctrl+alt+a"
+                "adminShortcut": "ctrl+alt+a",
+                "adminPassword": "Metro2024!"
             },
             "storage": {
                 "retentionDays": 30,
@@ -277,3 +279,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
