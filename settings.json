@@ -20,7 +20,7 @@
     "fullscreen": true,
     "language": "en",
     "adminShortcut": "<Control-Alt-a>",
-    "adminPassword": "12345678"
+    "adminPassword": "123"
   },
   "storage": {
     "retentionDays": 30,

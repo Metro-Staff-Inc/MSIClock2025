@@ -15,35 +15,112 @@ def show_admin_login(parent, callback: Callable[[bool], None]):
         with open('settings.json', 'r') as f:
             settings = json.load(f)
             
-        # Create and show input dialog
-        dialog = customtkinter.CTkInputDialog(
-            text="Enter Admin Password:",
-            title="Admin Login"
-        )
+        # Get scaling factor from settings
+        scaling_factor = settings['ui'].get('scaling_factor', 1.0)
+        
+        # Create scaled fonts
+        scaled_fonts = {
+            'text': ('Roboto', int(12 * scaling_factor)),
+            'button': ('Roboto', int(12 * scaling_factor), 'bold')
+        }
+            
+        # Create dialog window
+        dialog = customtkinter.CTkToplevel(parent)
+        dialog.title("Admin Login")
+        dialog.attributes('-topmost', True)
+        
+        # Scale dialog size
+        width = int(300 * scaling_factor)
+        height = int(150 * scaling_factor)
         
         # Center on screen
-        dialog.lift()
+        x = (dialog.winfo_screenwidth() - width) // 2
+        y = (dialog.winfo_screenheight() - height) // 2
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        
+        # Make it modal and ensure proper window management
+        dialog.transient(parent)
         dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() - 300) // 2
-        y = (dialog.winfo_screenheight() - 150) // 2
-        dialog.geometry(f"+{x}+{y}")
+        dialog.grab_set()
+        dialog.focus_force()
         
-        password = dialog.get_input()
+        # Keep window on top
+        dialog.lift()
+        parent.lift(dialog)
         
-        # Check password (handle cancel case)
-        if password is None:
-            callback(False)
-            return
-            
-        if password == settings['ui']['adminPassword']:
-            callback(True)
-        else:
-            customtkinter.CTkMessagebox(
-                title="Error",
-                message="Invalid password",
-                icon="cancel"
-            )
-            callback(False)
+        # Create password entry
+        password_var = customtkinter.StringVar()
+        
+        # Create and pack widgets
+        customtkinter.CTkLabel(
+            dialog,
+            text="Enter Admin Password:",
+            font=scaled_fonts['text']
+        ).pack(pady=(20, 10))
+        
+        entry = customtkinter.CTkEntry(
+            dialog,
+            textvariable=password_var,
+            show="*",
+            font=scaled_fonts['text']
+        )
+        entry.pack(pady=10, padx=20, fill="x")
+        
+        def submit():
+            entered_password = password_var.get().strip()
+            if entered_password == settings['ui']['adminPassword']:
+                dialog.destroy()
+                callback(True)
+            else:
+                # Show error message
+                error_dialog = customtkinter.CTkToplevel(parent)
+                error_dialog.title("Error")
+                error_dialog.attributes('-topmost', True)
+                error_dialog.transient(parent)
+                
+                # Set size and position
+                width = int(300 * scaling_factor)
+                height = int(150 * scaling_factor)
+                x = (error_dialog.winfo_screenwidth() - width) // 2
+                y = (error_dialog.winfo_screenheight() - height) // 2
+                error_dialog.geometry(f"{width}x{height}+{x}+{y}")
+                
+                # Add message and button
+                customtkinter.CTkLabel(
+                    error_dialog,
+                    text="Invalid password",
+                    font=scaled_fonts['text']
+                ).pack(pady=20)
+                
+                def close_error():
+                    error_dialog.destroy()
+                    dialog.destroy()
+                    callback(False)
+                
+                customtkinter.CTkButton(
+                    error_dialog,
+                    text="OK",
+                    command=close_error,
+                    font=scaled_fonts['button']
+                ).pack(pady=10)
+                
+                error_dialog.grab_set()
+                callback(False)
+        
+        # Add submit button
+        customtkinter.CTkButton(
+            dialog,
+            text="Submit",
+            command=submit,
+            font=scaled_fonts['button']
+        ).pack(pady=(10, 20))
+        
+        # Focus the entry
+        entry.focus_set()
+        
+        # Bind Enter key and focus
+        entry.bind("<Return>", lambda e: submit())
+        entry.focus_set()
             
     except Exception as e:
         logger.error(f"Failed to show admin login dialog: {e}")
@@ -55,30 +132,58 @@ class AdminPanel(customtkinter.CTkToplevel):
         self.settings_path = settings_path
         self.settings = self.load_settings()
         
-        self.title("Admin Control Panel")
-        self.geometry("800x600")
-        self.minsize(800, 600)
-        
-        # Center on screen
-        self.lift()  # Bring to front
-        self.update_idletasks()  # Update geometry
+        # Get scaling factor from settings
+        self.scaling_factor = self.settings['ui'].get('scaling_factor', 1.0)
         
         # Get screen dimensions
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
         
-        # Calculate position
-        window_width = 800
-        window_height = 600
+        # Calculate scaled dimensions
+        base_width = 800
+        base_height = 600
+        window_width = min(int(base_width * self.scaling_factor), screen_width - 100)  # Leave margin
+        window_height = min(int(base_height * self.scaling_factor), screen_height - 100)
+        
+        self.title("Admin Control Panel")
+        
+        # Set initial size to match content
+        self.geometry(f"{window_width}x{window_height}")
+        
+        # Update to ensure window is created
+        self.update_idletasks()
+        
+        # Set minimum size after window is created
+        self.minsize(window_width, window_height)
+        
+        # Center on screen
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
-        
-        # Set position
         self.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
-        # Make it modal
+        # Bring to front
+        self.lift()
+        
+        # Create scaled fonts dictionary
+        self.scaled_fonts = {
+            'title': ('Roboto', int(14 * self.scaling_factor), 'bold'),
+            'text': ('Roboto', int(12 * self.scaling_factor)),
+            'button': ('Roboto', int(12 * self.scaling_factor), 'bold')
+        }
+        
+        # Make it modal and ensure proper window management
         self.transient(parent)
+        self.attributes('-topmost', True)
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        # Ensure window is ready before grabbing focus
+        self.update_idletasks()
         self.grab_set()
+        self.focus_force()
+        
+        # Keep window on top
+        self.lift()
+        parent.lift(self)  # Ensure admin panel stays above parent
         
         self.create_widgets()
         self.load_current_settings()
@@ -99,16 +204,36 @@ class AdminPanel(customtkinter.CTkToplevel):
         """Show error dialog"""
         dialog = customtkinter.CTkToplevel(self)
         dialog.title("Error")
-        dialog.geometry("300x100")
+        
+        # Scale dialog dimensions
+        width = int(300 * self.scaling_factor)
+        height = int(100 * self.scaling_factor)
+        dialog.geometry(f"{width}x{height}")
         dialog.transient(self)
         dialog.grab_set()
         
-        customtkinter.CTkLabel(dialog, text=message, wraplength=250).pack(pady=10)
-        customtkinter.CTkButton(dialog, text="OK", command=dialog.destroy).pack()
+        customtkinter.CTkLabel(
+            dialog,
+            text=message,
+            wraplength=int(250 * self.scaling_factor),
+            font=self.scaled_fonts['text']
+        ).pack(pady=int(10 * self.scaling_factor))
+        
+        customtkinter.CTkButton(
+            dialog,
+            text="OK",
+            command=dialog.destroy,
+            font=self.scaled_fonts['button'],
+            height=int(30 * self.scaling_factor)
+        ).pack()
 
     def create_widgets(self):
+        # Create main container frame
+        self.main_frame = customtkinter.CTkFrame(self)
+        self.main_frame.pack(fill="both", expand=True)
+        
         # Create tabview for tabs
-        self.tabview = customtkinter.CTkTabview(self)
+        self.tabview = customtkinter.CTkTabview(self.main_frame)
         self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Create tabs
@@ -120,50 +245,69 @@ class AdminPanel(customtkinter.CTkToplevel):
     def create_settings_tab(self):
         settings_tab = self.tabview.add("Settings")
         
+        # Configure grid weights for settings tab
+        settings_tab.grid_columnconfigure(0, weight=1)
+        settings_tab.grid_rowconfigure(0, weight=1)
+        
         # Create scrollable frame for entire content
         scrollable_frame = customtkinter.CTkScrollableFrame(settings_tab)
-        scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        scrollable_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        
+        # Configure grid weights for scrollable frame
+        scrollable_frame.grid_columnconfigure(0, weight=1)
         
         # Content container
         content_frame = customtkinter.CTkFrame(scrollable_frame)
-        content_frame.pack(fill="x", expand=True)
+        content_frame.grid(row=0, column=0, sticky="ew")
+        content_frame.grid_columnconfigure(0, weight=1)
+        
+        current_row = 0
         
         # SOAP Settings
         soap_frame = customtkinter.CTkFrame(content_frame)
-        soap_frame.pack(fill="x", pady=(0, 20))
+        soap_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 20))
+        soap_frame.grid_columnconfigure(0, weight=1)
         
-        customtkinter.CTkLabel(soap_frame, text="SOAP Configuration", font=('Arial', 14, 'bold')).pack(anchor="w", padx=10, pady=5)
+        soap_row = 0
+        customtkinter.CTkLabel(soap_frame, text="SOAP Configuration", font=self.scaled_fonts['title']).grid(row=soap_row, column=0, sticky="w", padx=10, pady=5)
         
         # Client ID
-        customtkinter.CTkLabel(soap_frame, text="Client ID:").pack(anchor="w", padx=10)
+        soap_row += 1
+        customtkinter.CTkLabel(soap_frame, text="Client ID:", font=self.scaled_fonts['text']).grid(row=soap_row, column=0, sticky="w", padx=10)
+        soap_row += 1
         self.client_id_var = customtkinter.StringVar()
-        customtkinter.CTkEntry(soap_frame, textvariable=self.client_id_var).pack(fill="x", padx=10, pady=(0, 10))
+        customtkinter.CTkEntry(soap_frame, textvariable=self.client_id_var, font=self.scaled_fonts['text']).grid(row=soap_row, column=0, sticky="ew", padx=10, pady=(0, 10))
         
         # Username
-        customtkinter.CTkLabel(soap_frame, text="Username:").pack(anchor="w", padx=10)
+        soap_row += 1
+        customtkinter.CTkLabel(soap_frame, text="Username:", font=self.scaled_fonts['text']).grid(row=soap_row, column=0, sticky="w", padx=10)
+        soap_row += 1
         self.username_var = customtkinter.StringVar()
-        customtkinter.CTkEntry(soap_frame, textvariable=self.username_var).pack(fill="x", padx=10, pady=(0, 10))
+        customtkinter.CTkEntry(soap_frame, textvariable=self.username_var, font=self.scaled_fonts['text']).grid(row=soap_row, column=0, sticky="ew", padx=10, pady=(0, 10))
         
-        # SOAP Password (always visible)
-        customtkinter.CTkLabel(soap_frame, text="Password:").pack(anchor="w", padx=10)
+        # SOAP Password
+        soap_row += 1
+        customtkinter.CTkLabel(soap_frame, text="Password:", font=self.scaled_fonts['text']).grid(row=soap_row, column=0, sticky="w", padx=10)
+        soap_row += 1
         self.password_var = customtkinter.StringVar()
-        self.password_entry = customtkinter.CTkEntry(soap_frame, textvariable=self.password_var)
-        self.password_entry.pack(fill="x", padx=10, pady=(0, 10))
+        self.password_entry = customtkinter.CTkEntry(soap_frame, textvariable=self.password_var, font=self.scaled_fonts['text'])
+        self.password_entry.grid(row=soap_row, column=0, sticky="ew", padx=10, pady=(0, 10))
         
         # Admin Settings
+        current_row += 1
         admin_frame = customtkinter.CTkFrame(content_frame)
-        admin_frame.pack(fill="x", pady=(0, 20))
+        admin_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 20))
+        admin_frame.grid_columnconfigure(1, weight=1)  # Column 1 will contain the entry fields
         
-        customtkinter.CTkLabel(admin_frame, text="Admin Configuration", font=('Arial', 14, 'bold')).pack(anchor="w", padx=10, pady=5)
+        admin_row = 0
+        customtkinter.CTkLabel(admin_frame, text="Admin Configuration", font=self.scaled_fonts['title']).grid(row=admin_row, column=0, columnspan=3, sticky="w", padx=10, pady=5)
         
         # New Admin Password with toggle
-        customtkinter.CTkLabel(admin_frame, text="New Password:").pack(anchor="w", padx=10)
-        new_pass_frame = customtkinter.CTkFrame(admin_frame, fg_color="transparent")
-        new_pass_frame.pack(fill="x", padx=10, pady=(0, 10))
-        
+        admin_row += 1
+        customtkinter.CTkLabel(admin_frame, text="New Password:", font=self.scaled_fonts['text']).grid(row=admin_row, column=0, sticky="w", padx=10)
         self.new_password_var = customtkinter.StringVar()
-        self.new_password_entry = customtkinter.CTkEntry(new_pass_frame, textvariable=self.new_password_var, show="*")
-        self.new_password_entry.pack(side="left", fill="x", expand=True)
+        self.new_password_entry = customtkinter.CTkEntry(admin_frame, textvariable=self.new_password_var, show="*", font=self.scaled_fonts['text'])
+        self.new_password_entry.grid(row=admin_row, column=1, sticky="ew", padx=10, pady=(0, 10))
         
         def toggle_new_password():
             if self.new_password_entry.cget('show') == '':
@@ -172,21 +316,19 @@ class AdminPanel(customtkinter.CTkToplevel):
                 self.new_password_entry.configure(show='')
         
         new_toggle_btn = customtkinter.CTkButton(
-            new_pass_frame,
+            admin_frame,
             text="👁",
             width=30,
             command=toggle_new_password
         )
-        new_toggle_btn.pack(side="left", padx=(5, 0))
+        new_toggle_btn.grid(row=admin_row, column=2, padx=(0, 10))
         
         # Confirm Admin Password with toggle
-        customtkinter.CTkLabel(admin_frame, text="Confirm Password:").pack(anchor="w", padx=10)
-        confirm_pass_frame = customtkinter.CTkFrame(admin_frame, fg_color="transparent")
-        confirm_pass_frame.pack(fill="x", padx=10, pady=(0, 10))
-        
+        admin_row += 1
+        customtkinter.CTkLabel(admin_frame, text="Confirm Password:", font=self.scaled_fonts['text']).grid(row=admin_row, column=0, sticky="w", padx=10)
         self.confirm_password_var = customtkinter.StringVar()
-        self.confirm_password_entry = customtkinter.CTkEntry(confirm_pass_frame, textvariable=self.confirm_password_var, show="*")
-        self.confirm_password_entry.pack(side="left", fill="x", expand=True)
+        self.confirm_password_entry = customtkinter.CTkEntry(admin_frame, textvariable=self.confirm_password_var, show="*", font=self.scaled_fonts['text'])
+        self.confirm_password_entry.grid(row=admin_row, column=1, sticky="ew", padx=10, pady=(0, 10))
         
         def toggle_confirm_password():
             if self.confirm_password_entry.cget('show') == '':
@@ -195,30 +337,37 @@ class AdminPanel(customtkinter.CTkToplevel):
                 self.confirm_password_entry.configure(show='')
         
         confirm_toggle_btn = customtkinter.CTkButton(
-            confirm_pass_frame,
+            admin_frame,
             text="👁",
-            width=30,
-            command=toggle_confirm_password
+            width=int(30 * self.scaling_factor),  # Scale button width
+            command=toggle_confirm_password,
+            font=self.scaled_fonts['text']
         )
-        confirm_toggle_btn.pack(side="left", padx=(5, 0))
+        confirm_toggle_btn.grid(row=admin_row, column=2, padx=(0, 10))
         
         # Storage Settings
+        current_row += 1
         storage_frame = customtkinter.CTkFrame(content_frame)
-        storage_frame.pack(fill="x", pady=(0, 20))
+        storage_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 20))
+        storage_frame.grid_columnconfigure(1, weight=1)
         
-        customtkinter.CTkLabel(storage_frame, text="Storage Configuration", font=('Arial', 14, 'bold')).pack(anchor="w", padx=10, pady=5)
+        storage_row = 0
+        customtkinter.CTkLabel(storage_frame, text="Storage Configuration", font=self.scaled_fonts['title']).grid(row=storage_row, column=0, columnspan=2, sticky="w", padx=10, pady=5)
         
         # Retention Days
-        customtkinter.CTkLabel(storage_frame, text="Retention Days:").pack(anchor="w", padx=10)
+        storage_row += 1
+        customtkinter.CTkLabel(storage_frame, text="Retention Days:", font=self.scaled_fonts['text']).grid(row=storage_row, column=0, sticky="w", padx=10)
         self.retention_var = customtkinter.StringVar()
-        customtkinter.CTkEntry(storage_frame, textvariable=self.retention_var).pack(fill="x", padx=10, pady=(0, 10))
+        customtkinter.CTkEntry(storage_frame, textvariable=self.retention_var, font=self.scaled_fonts['text']).grid(row=storage_row, column=1, sticky="ew", padx=10, pady=(0, 10))
         
         # Add some padding at the bottom of content
-        customtkinter.CTkFrame(content_frame, height=20).pack(fill="x")
+        current_row += 1
+        customtkinter.CTkFrame(content_frame, height=20).grid(row=current_row, column=0, sticky="ew")
         
         # Create a frame for the save button that stays at the bottom of the tab
         save_frame = customtkinter.CTkFrame(settings_tab)
-        save_frame.pack(side="bottom", fill="x", padx=10, pady=10)
+        save_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        save_frame.grid_columnconfigure(0, weight=1)
         
         # Save Button with theme colors
         save_button = customtkinter.CTkButton(
@@ -227,67 +376,96 @@ class AdminPanel(customtkinter.CTkToplevel):
             command=self.save_settings,
             fg_color="#A4D233",
             hover_color="#8AB22B",
-            height=40,
-            font=("Arial", 14, "bold"),
+            height=int(40 * self.scaling_factor),  # Scale button height
+            font=self.scaled_fonts['button'],
             text_color="#000000"  # Theme uses black text on buttons
         )
-        save_button.pack(fill="x")
+        save_button.grid(row=0, column=0, sticky="ew", padx=int(10 * self.scaling_factor), pady=int(5 * self.scaling_factor))
 
     def create_camera_tab(self):
         camera_tab = self.tabview.add("Camera")
         
+        # Configure grid weights for camera tab
+        camera_tab.grid_columnconfigure(0, weight=1)
+        
         # Camera Settings
         settings_frame = customtkinter.CTkFrame(camera_tab)
-        settings_frame.pack(fill="x", pady=(0, 10))
+        settings_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        settings_frame.grid_columnconfigure(1, weight=1)  # Column for entry fields
         
-        customtkinter.CTkLabel(settings_frame, text="Camera Settings", font=('Arial', 14, 'bold')).pack(anchor="w", padx=10, pady=5)
+        current_row = 0
+        customtkinter.CTkLabel(settings_frame, text="Camera Settings", font=self.scaled_fonts['title']).grid(row=current_row, column=0, columnspan=2, sticky="w", padx=10, pady=5)
         
         # Device ID
-        customtkinter.CTkLabel(settings_frame, text="Device ID:").pack(anchor="w", padx=10)
+        current_row += 1
+        customtkinter.CTkLabel(settings_frame, text="Device ID:", font=self.scaled_fonts['text']).grid(row=current_row, column=0, sticky="w", padx=10)
         self.device_id_var = customtkinter.StringVar()
-        customtkinter.CTkEntry(settings_frame, textvariable=self.device_id_var).pack(fill="x", padx=10, pady=(0, 10))
+        customtkinter.CTkEntry(settings_frame, textvariable=self.device_id_var, font=self.scaled_fonts['text']).grid(row=current_row, column=1, sticky="ew", padx=10, pady=(0, 10))
         
         # Quality
-        customtkinter.CTkLabel(settings_frame, text="Capture Quality:").pack(anchor="w", padx=10)
+        current_row += 1
+        customtkinter.CTkLabel(settings_frame, text="Capture Quality:", font=self.scaled_fonts['text']).grid(row=current_row, column=0, sticky="w", padx=10)
         self.quality_var = customtkinter.StringVar()
-        customtkinter.CTkEntry(settings_frame, textvariable=self.quality_var).pack(fill="x", padx=10, pady=(0, 10))
+        customtkinter.CTkEntry(settings_frame, textvariable=self.quality_var, font=self.scaled_fonts['text']).grid(row=current_row, column=1, sticky="ew", padx=10, pady=(0, 10))
         
         # Test Camera Button
-        customtkinter.CTkButton(camera_tab, text="Test Camera", command=self.test_camera).pack(pady=10)
+        test_button = customtkinter.CTkButton(
+            camera_tab,
+            text="Test Camera",
+            command=self.test_camera,
+            font=self.scaled_fonts['button'],
+            height=int(35 * self.scaling_factor)
+        )
+        test_button.grid(row=1, column=0, pady=int(10 * self.scaling_factor))
 
     def create_logs_tab(self):
         logs_tab = self.tabview.add("Logs")
         
+        # Configure grid weights for logs tab
+        logs_tab.grid_columnconfigure(0, weight=1)
+        logs_tab.grid_rowconfigure(0, weight=1)
+        
         # Create main container
         main_container = customtkinter.CTkFrame(logs_tab)
-        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+        main_container.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         
-        # Log viewer with increased height
-        self.log_text = customtkinter.CTkTextbox(main_container, wrap="word", height=400)
-        self.log_text.pack(fill="both", expand=True, padx=5, pady=(5, 10))
+        # Configure grid weights for main container
+        main_container.grid_columnconfigure(0, weight=1)
+        main_container.grid_rowconfigure(0, weight=1)
+        
+        # Log viewer with increased height and scaled dimensions
+        scaled_height = int(400 * self.scaling_factor)
+        self.log_text = customtkinter.CTkTextbox(
+            main_container,
+            wrap="word",
+            height=scaled_height,
+            font=self.scaled_fonts['text']
+        )
+        self.log_text.grid(row=0, column=0, sticky="nsew", padx=int(5 * self.scaling_factor), pady=(int(5 * self.scaling_factor), int(10 * self.scaling_factor)))
         
         # Buttons with better styling
         button_frame = customtkinter.CTkFrame(main_container)
-        button_frame.pack(fill="x", padx=5, pady=5)
+        button_frame.grid(row=1, column=0, sticky="ew", padx=int(5 * self.scaling_factor), pady=int(5 * self.scaling_factor))
+        button_frame.grid_columnconfigure((2, 3), weight=1)  # Add weight to columns after buttons
         
         customtkinter.CTkButton(
             button_frame,
             text="Refresh Logs",
             command=self.refresh_logs,
-            height=35,
-            font=("Arial", 12, "bold")
-        ).pack(side="left", padx=5)
+            height=int(35 * self.scaling_factor),
+            font=self.scaled_fonts['button']
+        ).grid(row=0, column=0, padx=int(5 * self.scaling_factor))
         
         customtkinter.CTkButton(
             button_frame,
             text="Clear Logs",
             command=self.clear_logs,
-            height=35,
-            font=("Arial", 12, "bold"),
+            height=int(35 * self.scaling_factor),
+            font=self.scaled_fonts['button'],
             fg_color="#A4D233",
             hover_color="#8AB22B",
             text_color="#000000"
-        ).pack(side="left", padx=5)
+        ).grid(row=0, column=1, padx=int(5 * self.scaling_factor))
         
         # Initial load of logs
         self.refresh_logs()
@@ -307,36 +485,73 @@ class AdminPanel(customtkinter.CTkToplevel):
     def create_system_tab(self):
         system_tab = self.tabview.add("System")
         
+        # Configure grid weights for system tab
+        system_tab.grid_columnconfigure(0, weight=1)
+        
+        current_row = 0
+        
         # System Information
         info_frame = customtkinter.CTkFrame(system_tab)
-        info_frame.pack(fill="x", pady=(0, 10))
+        info_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 10))
+        info_frame.grid_columnconfigure(0, weight=1)
         
-        customtkinter.CTkLabel(info_frame, text="System Information", font=('Arial', 14, 'bold')).pack(anchor="w", padx=10, pady=5)
-        customtkinter.CTkLabel(info_frame, text="Version: 1.0.0").pack(anchor="w", padx=10, pady=5)
+        info_row = 0
+        customtkinter.CTkLabel(info_frame, text="System Information", font=self.scaled_fonts['title']).grid(row=info_row, column=0, sticky="w", padx=10, pady=5)
+        info_row += 1
+        customtkinter.CTkLabel(info_frame, text="Version: 1.0.0", font=self.scaled_fonts['text']).grid(row=info_row, column=0, sticky="w", padx=10, pady=5)
         
         # Database Status
+        current_row += 1
         db_frame = customtkinter.CTkFrame(system_tab)
-        db_frame.pack(fill="x", pady=(0, 10))
+        db_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, int(10 * self.scaling_factor)))
+        db_frame.grid_columnconfigure(0, weight=1)
         
-        customtkinter.CTkLabel(db_frame, text="Database", font=('Arial', 14, 'bold')).pack(anchor="w", padx=10, pady=5)
-        customtkinter.CTkButton(db_frame, text="Clean Old Records", command=self.clean_old_records).pack(anchor="w", padx=10, pady=5)
+        db_row = 0
+        customtkinter.CTkLabel(db_frame, text="Database", font=self.scaled_fonts['title']).grid(row=db_row, column=0, sticky="w", padx=10, pady=5)
+        db_row += 1
+        customtkinter.CTkButton(
+            db_frame,
+            text="Clean Old Records",
+            command=self.clean_old_records,
+            font=self.scaled_fonts['button'],
+            height=int(35 * self.scaling_factor)
+        ).grid(row=db_row, column=0, sticky="w", padx=10, pady=5)
         
         # Network Status
+        current_row += 1
         net_frame = customtkinter.CTkFrame(system_tab)
-        net_frame.pack(fill="x", pady=(0, 10))
+        net_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, int(10 * self.scaling_factor)))
+        net_frame.grid_columnconfigure(0, weight=1)
         
-        customtkinter.CTkLabel(net_frame, text="Network", font=('Arial', 14, 'bold')).pack(anchor="w", padx=10, pady=5)
-        customtkinter.CTkButton(net_frame, text="Test Connection", command=self.test_connection).pack(anchor="w", padx=10, pady=5)
+        net_row = 0
+        customtkinter.CTkLabel(net_frame, text="Network", font=self.scaled_fonts['title']).grid(row=net_row, column=0, sticky="w", padx=10, pady=5)
+        net_row += 1
+        customtkinter.CTkButton(
+            net_frame,
+            text="Test Connection",
+            command=self.test_connection,
+            font=self.scaled_fonts['button'],
+            height=int(35 * self.scaling_factor)
+        ).grid(row=net_row, column=0, sticky="w", padx=10, pady=5)
         
         # Program Control
+        current_row += 1
         control_frame = customtkinter.CTkFrame(system_tab)
-        control_frame.pack(fill="x", pady=(0, 10))
+        control_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, int(10 * self.scaling_factor)))
+        control_frame.grid_columnconfigure(0, weight=1)
         
-        customtkinter.CTkLabel(control_frame, text="Program Control", font=('Arial', 14, 'bold')).pack(anchor="w", padx=10, pady=5)
-        customtkinter.CTkButton(control_frame, text="Close Program", 
-                              command=self.close_program,
-                              fg_color=StatusColors.ERROR,
-                              hover_color="#CC2F26").pack(anchor="w", padx=10, pady=5)
+        control_row = 0
+        customtkinter.CTkLabel(control_frame, text="Program Control", font=self.scaled_fonts['title']).grid(row=control_row, column=0, sticky="w", padx=10, pady=5)
+        control_row += 1
+        customtkinter.CTkButton(
+            control_frame,
+            text="Close Program",
+            command=self.close_program,
+            fg_color=StatusColors.ERROR,
+            hover_color="#CC2F26",
+            font=self.scaled_fonts['button'],
+            height=int(35 * self.scaling_factor)
+        ).grid(row=control_row, column=0, sticky="w", padx=10, pady=5)
 
     def load_current_settings(self):
         # Load admin settings

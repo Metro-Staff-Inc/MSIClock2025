@@ -85,8 +85,8 @@ class TimeClock:
                 "deviceId": 0,
                 "captureQuality": 85,
                 "resolution": {
-                    "width": 320,
-                    "height": 240
+                    "width": 640,
+                    "height": 480
                 }
             },
             "ui": {
@@ -147,20 +147,79 @@ class TimeClock:
         self.root = customtkinter.CTk()
         self.root.title("MSI Time Clock")
         
-        # Force 800x600 for testing
-        self.root.geometry("800x600")
-        self.root.resizable(False, False)  # Prevent resizing
+        # Get screen dimensions
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
         
-        '''
-        # Set fullscreen
-        if self.settings['ui']['fullscreen']:
-            self.root.attributes('-fullscreen', True)
-        '''
+        # Calculate scaling factor based on screen resolution
+        # Use 1080p as base resolution but be more conservative with width
+        base_width = 1600  # More conservative base width
+        base_height = 1080
+        
+        # Calculate scale factors
+        width_scale = screen_width / base_width
+        height_scale = screen_height / base_height
+        
+        # Use a balanced scaling approach that prioritizes fitting width
+        width_factor = min(width_scale, 1.0)  # Never scale up width
+        height_factor = min(height_scale, 1.0)  # Never scale up height
+        scale_factor = min(width_factor, height_factor)  # Use the smaller scale
+        
+        # Update the settings with the calculated scale factor
+        if 'ui' not in self.settings:
+            self.settings['ui'] = {}
+        self.settings['ui']['scaling_factor'] = scale_factor
+        
+        # Set scaling for CustomTkinter widgets
+        customtkinter.set_widget_scaling(scale_factor)
+        customtkinter.set_window_scaling(scale_factor)
+        
+        # Set minimum window size with scaling
+        min_width = int(800 * scale_factor)
+        min_height = int(600 * scale_factor)
+        self.root.minsize(min_width, min_height)
+        
+        # Set window icon if available
+        if os.path.exists('app.ico'):
+            self.root.iconbitmap('app.ico')
+        
+        # Configure basic window properties
+        self.root.minsize(min_width, min_height)
+        self.root.resizable(True, True)
+        
+        if self.settings['ui'].get('fullscreen', True):
+            # Remove window decorations first
+            self.root.overrideredirect(True)
+            
+            # Set window properties
+            self.root.attributes('-topmost', True)
+            
+            # Calculate window size (account for taskbar height)
+            taskbar_height = 40  # Estimated taskbar height
+            window_height = screen_height - taskbar_height
+            
+            # Position window at top-left, accounting for taskbar
+            self.root.geometry(f"{screen_width}x{window_height}+0+0")
+            
+            # Update to ensure geometry is applied
+            self.root.update_idletasks()
+            
+            # Ensure window is properly focused
+            self.root.focus_force()
+        else:
+            # For non-fullscreen mode, center the window
+            x = (screen_width - min_width) // 2
+            y = (screen_height - min_height) // 2
+            self.root.geometry(f"{min_width}x{min_height}+{x}+{y}")
+            
+        # Ensure window is ready and visible
+        self.root.update_idletasks()
+        self.root.lift()
             
         # Prevent alt+f4
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
-        # Bind admin shortcut
+        # Bind admin shortcut to root window
         self.root.bind(self.settings['ui']['adminShortcut'], self.show_admin_dialog)
 
     def init_services(self):
@@ -185,8 +244,8 @@ class TimeClock:
             )
 
     def create_ui(self):
-        # Create main UI
-        self.time_clock_ui = TimeClockUI(self.root)
+        # Create main UI with settings
+        self.time_clock_ui = TimeClockUI(self.root, settings=self.settings)
         self.time_clock_ui.pack(fill="both", expand=True)
 
     def schedule_tasks(self):
@@ -244,7 +303,28 @@ class TimeClock:
         """Show admin login dialog"""
         def on_login(success: bool):
             if success:
-                AdminPanel(self.root)
+                # Create admin panel as a Toplevel window
+                admin_panel = AdminPanel(self.root)
+                
+                # Get screen dimensions
+                screen_width = admin_panel.winfo_screenwidth()
+                screen_height = admin_panel.winfo_screenheight()
+                
+                # Set size based on screen dimensions
+                panel_width = int(screen_width * 0.8)  # 80% of screen width
+                panel_height = int(screen_height * 0.8)  # 80% of screen height
+                
+                # Center the window
+                x = (screen_width - panel_width) // 2
+                y = (screen_height - panel_height) // 2
+                
+                # Set geometry and properties
+                admin_panel.geometry(f"{panel_width}x{panel_height}+{x}+{y}")
+                admin_panel.minsize(800, 600)
+                admin_panel.attributes('-topmost', True)  # Keep on top
+                admin_panel.transient(self.root)  # Set as transient to main window
+                admin_panel.grab_set()  # Make it modal
+                admin_panel.focus_force()  # Ensure focus
         
         show_admin_login(self.root, on_login)
 
