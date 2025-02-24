@@ -21,7 +21,9 @@ def main():
     # Font URLs from reliable TTF sources
     fonts = {
         "Roboto-Regular.ttf": "https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Regular.ttf",
-        "OpenSans-Regular.ttf": "https://raw.githubusercontent.com/googlefonts/opensans/main/fonts/ttf/OpenSans-Regular.ttf"
+        "OpenSans-Regular.ttf": "https://raw.githubusercontent.com/googlefonts/opensans/main/fonts/ttf/OpenSans-Regular.ttf",
+        "IBM-Plex-Sans.ttf": "https://github.com/IBM/plex/blob/master/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Regular.ttf",
+        "IBM-Plex-Sans-Cond.ttf": "https://github.com/IBM/plex/blob/master/packages/plex-sans-condensed/fonts/complete/ttf/IBMPlexSansCondensed-Bold.ttf" 
     }
     
     # Download each font

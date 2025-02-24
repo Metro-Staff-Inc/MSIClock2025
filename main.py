@@ -146,46 +146,29 @@ class TimeClock:
         
         self.root = customtkinter.CTk()
         self.root.title("MSI Time Clock")
+        customtkinter.set_appearance_mode("dark")
         
         # Get screen dimensions
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         
-        # Calculate scaling factor based on screen resolution
-        # Use 1080p as base resolution but be more conservative with width
-        base_width = 1600  # More conservative base width
-        base_height = 1080
+        # Set fixed window size
+        window_width = 800
+        window_height = 600
         
-        # Calculate scale factors
-        width_scale = screen_width / base_width
-        height_scale = screen_height / base_height
-        
-        # Use a balanced scaling approach that prioritizes fitting width
-        width_factor = min(width_scale, 1.0)  # Never scale up width
-        height_factor = min(height_scale, 1.0)  # Never scale up height
-        scale_factor = min(width_factor, height_factor)  # Use the smaller scale
-        
-        # Update the settings with the calculated scale factor
+        # Update the settings
         if 'ui' not in self.settings:
             self.settings['ui'] = {}
-        self.settings['ui']['scaling_factor'] = scale_factor
-        
-        # Set scaling for CustomTkinter widgets
-        customtkinter.set_widget_scaling(scale_factor)
-        customtkinter.set_window_scaling(scale_factor)
-        
-        # Set minimum window size with scaling
-        min_width = int(800 * scale_factor)
-        min_height = int(600 * scale_factor)
-        self.root.minsize(min_width, min_height)
+        self.settings['ui']['scaling_factor'] = 1.0  # No scaling
         
         # Set window icon if available
         if os.path.exists('app.ico'):
             self.root.iconbitmap('app.ico')
         
         # Configure basic window properties
-        self.root.minsize(min_width, min_height)
-        self.root.resizable(True, True)
+        self.root.minsize(window_width, window_height)
+        self.root.maxsize(window_width, window_height)
+        self.root.resizable(False, False)
         
         if self.settings['ui'].get('fullscreen', True):
             # Remove window decorations first
@@ -194,12 +177,12 @@ class TimeClock:
             # Set window properties
             self.root.attributes('-topmost', True)
             
-            # Calculate window size (account for taskbar height)
-            taskbar_height = 40  # Estimated taskbar height
-            window_height = screen_height - taskbar_height
+            # Calculate position to center the window
+            x = (screen_width - window_width) // 2
+            y = (screen_height - window_height) // 2
             
-            # Position window at top-left, accounting for taskbar
-            self.root.geometry(f"{screen_width}x{window_height}+0+0")
+            # Position window at center
+            self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
             
             # Update to ensure geometry is applied
             self.root.update_idletasks()
@@ -208,9 +191,9 @@ class TimeClock:
             self.root.focus_force()
         else:
             # For non-fullscreen mode, center the window
-            x = (screen_width - min_width) // 2
-            y = (screen_height - min_height) // 2
-            self.root.geometry(f"{min_width}x{min_height}+{x}+{y}")
+            x = (screen_width - window_width) // 2
+            y = (screen_height - window_height) // 2
+            self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
             
         # Ensure window is ready and visible
         self.root.update_idletasks()
@@ -323,7 +306,7 @@ class TimeClock:
                 admin_panel.minsize(800, 600)
                 admin_panel.attributes('-topmost', True)  # Keep on top
                 admin_panel.transient(self.root)  # Set as transient to main window
-                admin_panel.grab_set()  # Make it modal
+                admin_panel.grab_set()  # Make 008000it modal
                 admin_panel.focus_force()  # Ensure focus
         
         show_admin_login(self.root, on_login)

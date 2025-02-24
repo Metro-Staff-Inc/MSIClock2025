@@ -8,9 +8,9 @@
   "CTkFrame": {
     "corner_radius": 0,
     "border_width": 0,
-    "fg_color": ["gray86", "#2D2D2D"],
-    "top_fg_color": ["gray86", "#333333"],
-    "border_color": ["gray65", "#3A3A3A"]
+    "fg_color": ["gray86", "#212121"],
+    "top_fg_color": ["gray86", "#212121"],
+    "border_color": ["gray65", "#000000"]
   },
   "CTkButton": {
     "corner_radius": 0,
@@ -138,17 +138,29 @@
   },
   "CTkFont": {
     "macOS": {
-      "family": ["assets/fonts/Roboto-Regular.ttf", "Roboto", "SF Display"],
+      "family": [
+        "assets/fonts/IBM-Plex-Sans.ttf",
+        "IBMPlexSans Medium",
+        "SF Display"
+      ],
       "size": 13,
       "weight": "normal"
     },
     "Windows": {
-      "family": ["assets/fonts/Roboto-Regular.ttf", "Roboto", "Segoe UI"],
+      "family": [
+        "assets/fonts/IBM-Plex-Sans.ttf",
+        "IBMPlexSans Medium",
+        "Arial"
+      ],
       "size": 13,
       "weight": "normal"
     },
     "Linux": {
-      "family": ["assets/fonts/Roboto-Regular.ttf", "Roboto", "Ubuntu"],
+      "family": [
+        "assets/fonts/IBM-Plex-Sans.ttf",
+        "IBMPlexSans Medium",
+        "Ubuntu"
+      ],
       "size": 13,
       "weight": "normal"
     }
@@ -156,20 +168,28 @@
   "CTkFontSecondary": {
     "macOS": {
       "family": [
-        "assets/fonts/OpenSans-Regular.ttf",
-        "Open Sans",
+        "assets/fonts/IBM-Plex-Sans-Cond.ttf",
+        "IBMPlexSansCond Bold",
         "SF Display"
       ],
       "size": 13,
       "weight": "normal"
     },
     "Windows": {
-      "family": ["assets/fonts/OpenSans-Regular.ttf", "Open Sans", "Segoe UI"],
+      "family": [
+        "assets/fonts/IBM-Plex-Sans-Cond.ttf",
+        "IBMPlexSansCond Bold",
+        "Arial"
+      ],
       "size": 13,
       "weight": "normal"
     },
     "Linux": {
-      "family": ["assets/fonts/OpenSans-Regular.ttf", "Open Sans", "Ubuntu"],
+      "family": [
+        "assets/fonts/IBM-Plex-Sans-Cond.ttf",
+        "IBMPlexSansCond Bold",
+        "Ubuntu"
+      ],
       "size": 13,
       "weight": "normal"
     }

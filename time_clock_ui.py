@@ -11,42 +11,35 @@ from ui_theme import StatusColors
 
 logger = logging.getLogger(__name__)
 
+## Create all Elements First - We will arrange and re-size them later
+
 class TimerLabel(customtkinter.CTkFrame):
     """Frame that displays date and time"""
-    def __init__(self, parent, scaling_factor: float, scaled_fonts: dict):
+    def __init__(self, parent):
         super().__init__(parent)
         
-        self.scaling_factor = scaling_factor
-        self.scaled_fonts = scaled_fonts
+        self.configure(fg_color="transparent")
         
-        # Configure grid
-        self.grid_columnconfigure(0, weight=1)
+        # Configure grid for centering
+        self.grid_columnconfigure((0, 1), weight=1)
         
-        # Create a frame to hold time and AM/PM horizontally
-        time_frame = customtkinter.CTkFrame(self, fg_color="transparent")
-        time_frame.grid(row=0, column=0, sticky="ew")
-        
-        # Configure time frame grid - center the time display
-        time_frame.grid_columnconfigure((0, 2), weight=1)  # Equal weight to columns before and after
-        
-        # Create time label with larger, bold font
+        # Create time label with large, bold font
         self.time_label = customtkinter.CTkLabel(
-            time_frame,
+            self,
             text="",
-            font=self.scaled_fonts['clock']
+            font=('IBM Plex Sans Condensed Bold', 72),
+            text_color="#F0F0F0"
         )
-        self.time_label.grid(row=0, column=1, padx=(0, 10))
+        self.time_label.grid(row=0, column=0)
         
-        # Create smaller AM/PM label
+        # Create AM/PM label
         self.ampm_label = customtkinter.CTkLabel(
-            time_frame,
+            self,
             text="",
-            font=self.scaled_fonts['ampm'],
-            anchor="s"  # Align to bottom
+            font=('IBM Plex Sans Condensed Bold', 40),
+            text_color="#F0F0F0"
         )
-        # Scale the padding for AM/PM alignment
-        ampm_padding = int(35 * self.scaling_factor)
-        self.ampm_label.grid(row=0, column=2, sticky="w", pady=(ampm_padding, 0))
+        self.ampm_label.grid(row=0, column=1, padx=(10, 0), pady=(25, 0))
         
         self.update_time()
 
@@ -72,31 +65,50 @@ class CameraPreview(customtkinter.CTkFrame):
         self.camera_service = camera_service
         self.preview_active = False
         
-        # Get scaling factor and fonts from parent's settings
+        # Get camera settings from parent
         if hasattr(parent, 'settings'):
-            self.scaling_factor = parent.settings['ui'].get('scaling_factor', 1.0)
-            self.scaled_fonts = parent.scaled_fonts
+            self.settings = parent.settings
         else:
-            self.scaling_factor = 1.0
-            self.scaled_fonts = {}
+            self.settings = {}
         
         # Configure grid for centering
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
         
-        # Get scaled dimensions
-        self.width = self.camera_service.settings['camera']['resolution']['width']
-        self.height = self.camera_service.settings['camera']['resolution']['height']
+        # Configure frame appearance
+        self.configure(fg_color="transparent", corner_radius=5)  # Make frame transparent with rounded corners
         
-        # Create canvas for preview with transparent background
-        self.canvas = customtkinter.CTkCanvas(
+        # Set fixed width and calculate height based on camera aspect ratio
+        self.width = 410  # Fixed width
+        camera_width = self.camera_service.settings['camera']['resolution']['width']
+        camera_height = self.camera_service.settings['camera']['resolution']['height']
+        aspect_ratio = camera_height / camera_width
+        self.height = int(self.width * aspect_ratio)
+        
+        logger.info(f"Camera resolution: {camera_width}x{camera_height}")
+        logger.info(f"Aspect ratio: {aspect_ratio:.3f}")
+        logger.info(f"Preview dimensions: {self.width}x{self.height}")
+        
+        # Create frame for preview
+        self.preview_frame = customtkinter.CTkFrame(
             self,
-            width=self.width,
-            height=self.height,
-            bg='#2A2A2A',  # Match the dark theme background
+            width=410,
+            height= int(410 * aspect_ratio),
+            #fg_color='#2A2A2A',  # Match the dark theme background
+            corner_radius=5
+        )
+        self.preview_frame.grid(row=0, column=0, padx=5, pady=0)
+        self.preview_frame.grid_propagate(False)
+        
+        # Create canvas inside the frame
+        self.canvas = customtkinter.CTkCanvas(
+            self.preview_frame,
+            width=410,
+            height=int(410 * aspect_ratio),
+            bg='#303030',  # Match the dark theme background
             highlightthickness=0  # Remove border
         )
-        self.canvas.grid(row=0, column=0)
+        self.canvas.place(relx=0.5, rely=0.5, anchor="center")
         
         self.current_image = None
 
@@ -127,6 +139,9 @@ class CameraPreview(customtkinter.CTkFrame):
             result = self.camera_service.capture_frame()
             if result:
                 frame, _ = result
+                # Resize frame to match canvas size
+                frame = cv2.resize(frame, (410, 230), interpolation=cv2.INTER_AREA)
+                
                 # Convert frame to PhotoImage
                 image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 image = Image.fromarray(image)
@@ -144,7 +159,7 @@ class CameraPreview(customtkinter.CTkFrame):
                     self.canvas.winfo_height() // 2,
                     text="Camera Error\nNo image available",
                     fill=StatusColors.ERROR,
-                    font=('Roboto', int(14 * self.scaling_factor)),
+                    font=('Roboto', 14),
                     justify="center"
                 )
         except Exception as e:
@@ -155,7 +170,7 @@ class CameraPreview(customtkinter.CTkFrame):
                 self.canvas.winfo_height() // 2,
                 text=f"Camera Error\n{str(e)}",
                 fill=StatusColors.ERROR,
-                font=('Roboto', int(14 * self.scaling_factor)),
+                font=('Roboto', 14),
                 justify="center"
             )
         
@@ -167,9 +182,6 @@ class TimeClockUI(customtkinter.CTkFrame):
         super().__init__(parent)
         self.settings = settings if settings is not None else self._load_settings(settings_path)
         
-        # Get scaling factor
-        self.scaling_factor = self.settings['ui'].get('scaling_factor', 1.0)
-        
         # Initialize services
         self.camera_service = CameraService(settings_path)
         self.soap_client = SoapClient(settings_path)
@@ -177,15 +189,6 @@ class TimeClockUI(customtkinter.CTkFrame):
         self.employee_id = customtkinter.StringVar()
         self.status_text = customtkinter.StringVar()
         self.status_text_es = customtkinter.StringVar()
-        
-        # Scale font sizes
-        self.scaled_fonts = {
-            'clock': ('Roboto', int(72 * self.scaling_factor), 'bold'),
-            'ampm': ('Roboto', int(36 * self.scaling_factor), 'bold'),
-            'date': ('Roboto', int(24 * self.scaling_factor)),
-            'status': ('Roboto', int(24 * self.scaling_factor)),
-            'entry': ('Open Sans', int(14 * self.scaling_factor), 'bold')
-        }
         
         self.create_widgets()
         
@@ -231,45 +234,81 @@ class TimeClockUI(customtkinter.CTkFrame):
             raise
 
     def create_widgets(self):
-        # Configure grid weights for main frame
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure((0, 1, 2), weight=0)  # No expansion by default
-        
-        # Top row (20% height) - Green header with logo and date
-        header_frame = customtkinter.CTkFrame(self, fg_color="#A4D233", height=int(self.winfo_screenheight() * 0.2))
-        header_frame.grid(row=0, column=0, sticky="ew")
-        header_frame.grid_propagate(False)  # Force height
-        header_frame.grid_columnconfigure((0, 1), weight=1)  # Equal columns
-        
-        # Calculate logo size based on header height
-        header_height = int(self.winfo_screenheight() * 0.2)
-        logo_height = int(header_height * 0.7)  # Logo takes 70% of header height
-        logo_width = int(logo_height * 2.5)  # Maintain aspect ratio
-        
-        # Load and display logo
-        try:
-            logo_image = customtkinter.CTkImage(
-                light_image=Image.open("assets/logo-white.png"),
-                dark_image=Image.open("assets/logo-white.png"),
-                size=(logo_width, logo_height)
-            )
-            logo_label = customtkinter.CTkLabel(
-                header_frame,
-                image=logo_image,
-                text=""
-            )
-            logo_label.grid(row=0, column=0, padx=20, pady=10, sticky="w")
-        except Exception as e:
-            logger.error(f"Failed to load logo: {e}")
-        
-        # Date display (right side of header)
-        date_label = customtkinter.CTkLabel(
-            header_frame,
-            text="",
-            font=('Roboto', int(32 * self.scaling_factor), 'bold'),  # Larger, bold font
-            text_color="#FFFFFF"
+        # Logo is 361 x 156 px with 15px padding
+        header_row = customtkinter.CTkFrame (
+            self,
+            height = 187,
+            fg_color = "#212121"
         )
-        date_label.grid(row=0, column=1, padx=40, pady=10, sticky="e")
+        
+        # Create panel for left column
+        left_column = customtkinter.CTkFrame (
+            self,
+            width = 364,
+            height = 260,
+            fg_color = "#404040",
+            corner_radius = 8
+        )
+        left_column.grid_propagate(False)  # Prevent frame from shrinking
+        
+        # Create panel for right column
+        right_column = customtkinter.CTkFrame (
+            self,
+            width = 420,
+            height = 260,
+            fg_color = "#303030",
+            corner_radius = 8
+        )
+        right_column.grid_propagate(False)  # Prevent frame from shrinking
+        right_column.grid_columnconfigure(0, weight=1)
+        right_column.grid_rowconfigure(0, weight=1)
+        
+        # Create panel for bottom row
+        bottom_row = customtkinter.CTkFrame (
+            self,
+            height = 153,
+            fg_color = "#212121",
+        )
+        
+        # Configure bottom_row grid for centering
+        bottom_row.grid_columnconfigure(0, weight=1)
+        bottom_row.grid_rowconfigure((0, 1), weight=1)
+        
+        # Configure grid weights for main frame
+        self.grid_columnconfigure((0, 1), weight=0)  # Fixed width columns
+        self.grid_rowconfigure((0, 1, 2), weight=1)  # Header, Clock/Camera, Status
+        
+        ########## Top Row - MSI logo spanning both columns
+        header_row.grid(row=0, column=0, columnspan=2, pady=(15, 16), sticky='nsew')
+        logo = customtkinter.CTkImage (
+            light_image = Image.open("assets/logo.png"),
+            dark_image = Image.open("assets/logo.png"),
+            size = (361, 156)
+        )
+        # Configure header_row grid
+        header_row.grid_columnconfigure(0, weight=1)
+        header_row.grid_rowconfigure(0, weight=1)
+        
+        logo_image = customtkinter.CTkLabel(
+            header_row,
+            image=logo,
+            text=''
+        )
+        logo_image.grid(row=0, column=0)
+        
+        ########## Left Column - Date and Time
+        left_column.grid(row=1, column=0, sticky='nsew', padx=(5,3))
+        left_column.grid_columnconfigure((0), weight=1)
+        left_column.grid_rowconfigure((0,1,2), weight=0)
+        
+        # Date
+        date_label = customtkinter.CTkLabel(
+            left_column,
+            text="",
+            font=('IBM Plex Sans Medium', 24),
+            text_color="#F0F0F0"
+        )
+        date_label.grid(row=0, column=0, sticky="nsew", pady=(20,0))
         
         # Update date
         def update_date():
@@ -277,71 +316,49 @@ class TimeClockUI(customtkinter.CTkFrame):
             self.after(60000, update_date)  # Update every minute
         update_date()
         
-        # Middle row (60% height) - Clock/Entry and Camera
-        middle_frame = customtkinter.CTkFrame(self, height=int(self.winfo_screenheight() * 0.6))
-        middle_frame.grid(row=1, column=0, sticky="ew")
-        middle_frame.grid_propagate(False)  # Force height
-        middle_frame.grid_columnconfigure((0, 1), weight=1)  # Equal columns
+        # Time
+        self.timer_label = TimerLabel(left_column)
+        self.timer_label.grid(row=1, column=0, pady=(0,30))
         
-        # Left column - Clock and Entry
-        left_column = customtkinter.CTkFrame(middle_frame, fg_color="transparent")
-        left_column.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
-        left_column.grid_columnconfigure(0, weight=1)
-        
-        # Clock display
-        self.timer_label = TimerLabel(left_column, self.scaling_factor, self.scaled_fonts)
-        self.timer_label.grid(row=0, column=0, sticky="ew", pady=(0, 20))
-        
-        # ID Entry
-        entry_width = int(200 * self.scaling_factor)
+        # ID Entry Box
         self.id_entry = customtkinter.CTkEntry(
             left_column,
             textvariable=self.employee_id,
-            font=self.scaled_fonts['entry'],
+            font=('IBM Plex Sans Medium', 24),
             justify="center",
-            width=entry_width
+            width=292,
+            height=53,
+            border_color="#A4D233",
+            border_width=4,
+            fg_color="#212121",
+            text_color="#F0F0F0"
         )
-        self.id_entry.grid(row=1, column=0, pady=20)
+        self.id_entry.grid (row=2, column=0)
         
-        # Right column - Camera Preview with transparent background
-        camera_width = int(self.camera_service.settings['camera']['resolution']['width'] * self.scaling_factor)
-        camera_height = int(self.camera_service.settings['camera']['resolution']['height'] * self.scaling_factor)
-        self.camera_service.settings['camera']['resolution']['width'] = camera_width
-        self.camera_service.settings['camera']['resolution']['height'] = camera_height
-        
-        camera_frame = customtkinter.CTkFrame(middle_frame, fg_color="transparent")
-        camera_frame.grid(row=0, column=1, sticky="nsew")
-        camera_frame.grid_columnconfigure(0, weight=1)
-        camera_frame.grid_rowconfigure(0, weight=1)
-        
-        self.camera_preview = CameraPreview(camera_frame, self.camera_service)
-        self.camera_preview.configure(fg_color="transparent")
+        ########## Right Column - Camera Preview
+        right_column.grid(row=1, column=1, sticky="ns", padx=(3,5))
+        # Create camera preview
+        self.camera_preview = CameraPreview(right_column, self.camera_service)
         self.camera_preview.grid(row=0, column=0)
         
-        # Bottom row (20% height) - Status Messages
-        bottom_frame = customtkinter.CTkFrame(self, height=int(self.winfo_screenheight() * 0.2))
-        bottom_frame.grid(row=2, column=0, sticky="ew")
-        bottom_frame.grid_propagate(False)  # Force height
-        bottom_frame.grid_columnconfigure(0, weight=1)
+        ########## Bottom Row - Status Messages
+        bottom_row.grid (row=2, column=0, columnspan=2, sticky="nsew")
         
-        # Status labels container for closer spacing
-        status_container = customtkinter.CTkFrame(bottom_frame, fg_color="transparent")
-        status_container.grid(row=0, column=0)
-        
-        # Larger status labels with less spacing
+        # Status labels
         self.status_label = customtkinter.CTkLabel(
-            status_container,
+            bottom_row,
             textvariable=self.status_text,
-            font=('Roboto', int(36 * self.scaling_factor), 'bold')  # Larger font
+            font=('IBM Plex Sans Medium', 40,),
+            text_color="#F0F0F0"
         )
-        self.status_label.grid(row=0, column=0, pady=(0, 5))  # Reduced spacing
-        
         self.status_label_es = customtkinter.CTkLabel(
-            status_container,
+            bottom_row,
             textvariable=self.status_text_es,
-            font=('Roboto', int(36 * self.scaling_factor), 'bold')  # Larger font
+            font=('IBM Plex Sans Medium', 40,),
+            text_color="#F0F0F0"
         )
-        self.status_label_es.grid(row=1, column=0)
+        self.status_label.grid(row=0, column=0, pady=(15,0))
+        self.status_label_es.grid(row=1, column=0, pady=(0,20))
         
         # Bind Return key using correct customtkinter syntax
         self.id_entry.bind(sequence="<Return>", command=self.process_punch)

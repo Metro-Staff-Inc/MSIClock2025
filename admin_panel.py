@@ -15,23 +15,14 @@ def show_admin_login(parent, callback: Callable[[bool], None]):
         with open('settings.json', 'r') as f:
             settings = json.load(f)
             
-        # Get scaling factor from settings
-        scaling_factor = settings['ui'].get('scaling_factor', 1.0)
-        
-        # Create scaled fonts
-        scaled_fonts = {
-            'text': ('Roboto', int(12 * scaling_factor)),
-            'button': ('Roboto', int(12 * scaling_factor), 'bold')
-        }
-            
         # Create dialog window
         dialog = customtkinter.CTkToplevel(parent)
         dialog.title("Admin Login")
         dialog.attributes('-topmost', True)
         
         # Scale dialog size
-        width = int(300 * scaling_factor)
-        height = int(150 * scaling_factor)
+        width = 300
+        height = 150
         
         # Center on screen
         x = (dialog.winfo_screenwidth() - width) // 2
@@ -50,6 +41,12 @@ def show_admin_login(parent, callback: Callable[[bool], None]):
         
         # Create password entry
         password_var = customtkinter.StringVar()
+        
+        scaled_fonts = {
+            'title': ('Roboto', 14, 'bold'),
+            'text': ('Roboto', 12),
+            'button': ('Roboto', 12, 'bold')
+        }
         
         # Create and pack widgets
         customtkinter.CTkLabel(
@@ -79,8 +76,8 @@ def show_admin_login(parent, callback: Callable[[bool], None]):
                 error_dialog.transient(parent)
                 
                 # Set size and position
-                width = int(300 * scaling_factor)
-                height = int(150 * scaling_factor)
+                width = 300
+                height = 150
                 x = (error_dialog.winfo_screenwidth() - width) // 2
                 y = (error_dialog.winfo_screenheight() - height) // 2
                 error_dialog.geometry(f"{width}x{height}+{x}+{y}")
@@ -132,9 +129,6 @@ class AdminPanel(customtkinter.CTkToplevel):
         self.settings_path = settings_path
         self.settings = self.load_settings()
         
-        # Get scaling factor from settings
-        self.scaling_factor = self.settings['ui'].get('scaling_factor', 1.0)
-        
         # Get screen dimensions
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
@@ -142,8 +136,8 @@ class AdminPanel(customtkinter.CTkToplevel):
         # Calculate scaled dimensions
         base_width = 800
         base_height = 600
-        window_width = min(int(base_width * self.scaling_factor), screen_width - 100)  # Leave margin
-        window_height = min(int(base_height * self.scaling_factor), screen_height - 100)
+        window_width = 700
+        window_height = 500
         
         self.title("Admin Control Panel")
         
@@ -166,9 +160,9 @@ class AdminPanel(customtkinter.CTkToplevel):
         
         # Create scaled fonts dictionary
         self.scaled_fonts = {
-            'title': ('Roboto', int(14 * self.scaling_factor), 'bold'),
-            'text': ('Roboto', int(12 * self.scaling_factor)),
-            'button': ('Roboto', int(12 * self.scaling_factor), 'bold')
+            'title': ('Roboto', 14, 'bold'),
+            'text': ('Roboto', 12),
+            'button': ('Roboto', 12, 'bold')
         }
         
         # Make it modal and ensure proper window management
@@ -206,8 +200,8 @@ class AdminPanel(customtkinter.CTkToplevel):
         dialog.title("Error")
         
         # Scale dialog dimensions
-        width = int(300 * self.scaling_factor)
-        height = int(100 * self.scaling_factor)
+        width = 300
+        height = 100
         dialog.geometry(f"{width}x{height}")
         dialog.transient(self)
         dialog.grab_set()
@@ -215,16 +209,16 @@ class AdminPanel(customtkinter.CTkToplevel):
         customtkinter.CTkLabel(
             dialog,
             text=message,
-            wraplength=int(250 * self.scaling_factor),
+            wraplength=250,
             font=self.scaled_fonts['text']
-        ).pack(pady=int(10 * self.scaling_factor))
+        ).pack(pady=10)
         
         customtkinter.CTkButton(
             dialog,
             text="OK",
             command=dialog.destroy,
             font=self.scaled_fonts['button'],
-            height=int(30 * self.scaling_factor)
+            height=30
         ).pack()
 
     def create_widgets(self):
@@ -339,7 +333,7 @@ class AdminPanel(customtkinter.CTkToplevel):
         confirm_toggle_btn = customtkinter.CTkButton(
             admin_frame,
             text="👁",
-            width=int(30 * self.scaling_factor),  # Scale button width
+            width=30,
             command=toggle_confirm_password,
             font=self.scaled_fonts['text']
         )
@@ -376,11 +370,11 @@ class AdminPanel(customtkinter.CTkToplevel):
             command=self.save_settings,
             fg_color="#A4D233",
             hover_color="#8AB22B",
-            height=int(40 * self.scaling_factor),  # Scale button height
+            height=40,  # Scale button height
             font=self.scaled_fonts['button'],
             text_color="#000000"  # Theme uses black text on buttons
         )
-        save_button.grid(row=0, column=0, sticky="ew", padx=int(10 * self.scaling_factor), pady=int(5 * self.scaling_factor))
+        save_button.grid(row=0, column=0, sticky="ew", padx=(10, 5))
 
     def create_camera_tab(self):
         camera_tab = self.tabview.add("Camera")
@@ -414,9 +408,9 @@ class AdminPanel(customtkinter.CTkToplevel):
             text="Test Camera",
             command=self.test_camera,
             font=self.scaled_fonts['button'],
-            height=int(35 * self.scaling_factor)
+            height=35
         )
-        test_button.grid(row=1, column=0, pady=int(10 * self.scaling_factor))
+        test_button.grid(row=1, column=0, pady=10)
 
     def create_logs_tab(self):
         logs_tab = self.tabview.add("Logs")
@@ -434,38 +428,38 @@ class AdminPanel(customtkinter.CTkToplevel):
         main_container.grid_rowconfigure(0, weight=1)
         
         # Log viewer with increased height and scaled dimensions
-        scaled_height = int(400 * self.scaling_factor)
+        scaled_height = 400
         self.log_text = customtkinter.CTkTextbox(
             main_container,
             wrap="word",
             height=scaled_height,
             font=self.scaled_fonts['text']
         )
-        self.log_text.grid(row=0, column=0, sticky="nsew", padx=int(5 * self.scaling_factor), pady=(int(5 * self.scaling_factor), int(10 * self.scaling_factor)))
+        self.log_text.grid(row=0, column=0, sticky="nsew", padx=5, pady=(5, 10))
         
         # Buttons with better styling
         button_frame = customtkinter.CTkFrame(main_container)
-        button_frame.grid(row=1, column=0, sticky="ew", padx=int(5 * self.scaling_factor), pady=int(5 * self.scaling_factor))
+        button_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
         button_frame.grid_columnconfigure((2, 3), weight=1)  # Add weight to columns after buttons
         
         customtkinter.CTkButton(
             button_frame,
             text="Refresh Logs",
             command=self.refresh_logs,
-            height=int(35 * self.scaling_factor),
+            height=35,
             font=self.scaled_fonts['button']
-        ).grid(row=0, column=0, padx=int(5 * self.scaling_factor))
+        ).grid(row=0, column=0, padx=5)
         
         customtkinter.CTkButton(
             button_frame,
             text="Clear Logs",
             command=self.clear_logs,
-            height=int(35 * self.scaling_factor),
+            height=35,
             font=self.scaled_fonts['button'],
             fg_color="#A4D233",
             hover_color="#8AB22B",
             text_color="#000000"
-        ).grid(row=0, column=1, padx=int(5 * self.scaling_factor))
+        ).grid(row=0, column=1, padx=5)
         
         # Initial load of logs
         self.refresh_logs()
@@ -503,7 +497,7 @@ class AdminPanel(customtkinter.CTkToplevel):
         # Database Status
         current_row += 1
         db_frame = customtkinter.CTkFrame(system_tab)
-        db_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, int(10 * self.scaling_factor)))
+        db_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 10))
         db_frame.grid_columnconfigure(0, weight=1)
         
         db_row = 0
@@ -514,13 +508,13 @@ class AdminPanel(customtkinter.CTkToplevel):
             text="Clean Old Records",
             command=self.clean_old_records,
             font=self.scaled_fonts['button'],
-            height=int(35 * self.scaling_factor)
+            height=35
         ).grid(row=db_row, column=0, sticky="w", padx=10, pady=5)
         
         # Network Status
         current_row += 1
         net_frame = customtkinter.CTkFrame(system_tab)
-        net_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, int(10 * self.scaling_factor)))
+        net_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 10))
         net_frame.grid_columnconfigure(0, weight=1)
         
         net_row = 0
@@ -531,13 +525,13 @@ class AdminPanel(customtkinter.CTkToplevel):
             text="Test Connection",
             command=self.test_connection,
             font=self.scaled_fonts['button'],
-            height=int(35 * self.scaling_factor)
+            height=35
         ).grid(row=net_row, column=0, sticky="w", padx=10, pady=5)
         
         # Program Control
         current_row += 1
         control_frame = customtkinter.CTkFrame(system_tab)
-        control_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, int(10 * self.scaling_factor)))
+        control_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 10))
         control_frame.grid_columnconfigure(0, weight=1)
         
         control_row = 0
@@ -550,7 +544,7 @@ class AdminPanel(customtkinter.CTkToplevel):
             fg_color=StatusColors.ERROR,
             hover_color="#CC2F26",
             font=self.scaled_fonts['button'],
-            height=int(35 * self.scaling_factor)
+            height=35
         ).grid(row=control_row, column=0, sticky="w", padx=10, pady=5)
 
     def load_current_settings(self):
@@ -691,8 +685,7 @@ class AdminPanel(customtkinter.CTkToplevel):
         y = (dialog.winfo_screenheight() - 150) // 2
         dialog.geometry(f"+{x}+{y}")
         
-        customtkinter.CTkLabel(dialog, text="Are you sure you want to close the program?", 
-                             wraplength=250).pack(pady=10)
+        customtkinter.CTkLabel(dialog, text="Are you sure you want to close the program?", wraplength=250).pack(pady=10)
         
         button_frame = customtkinter.CTkFrame(dialog)
         button_frame.pack(fill="x", padx=20)
