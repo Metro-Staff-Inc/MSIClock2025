@@ -1,6 +1,7 @@
 import cv2
 import logging
 import numpy as np
+import sys
 from typing import Optional, Tuple, Dict
 from datetime import datetime
 import json
@@ -91,18 +92,34 @@ class CameraService:
                 self.camera.release()
 
             device_id = self.settings['camera']['deviceId']
-            
-            # Try different backends in order of preference
-            backends = [
-                cv2.CAP_DSHOW,  # DirectShow (Windows)
-                cv2.CAP_MSMF,   # Microsoft Media Foundation
-                cv2.CAP_ANY     # Auto-detect
-            ]
-            
-            for backend in backends:
-                self.camera = cv2.VideoCapture(device_id + backend)
-                if self.camera.isOpened():
-                    break
+            # Select backends based on platform
+            if sys.platform == 'win32':
+                # Windows-specific backends
+                backends = [
+                    cv2.CAP_DSHOW,  # DirectShow (Windows)
+                    cv2.CAP_MSMF,   # Microsoft Media Foundation
+                    cv2.CAP_ANY     # Auto-detect
+                ]
+                
+                # Try each backend
+                for backend in backends:
+                    self.camera = cv2.VideoCapture(device_id + backend)
+                    if self.camera.isOpened():
+                        logger.debug(f"Camera initialized with Windows backend: {backend}")
+                        break
+            else:
+                # Linux/macOS backends
+                try:
+                    # On Linux, typically just use the device ID directly
+                    self.camera = cv2.VideoCapture(device_id)
+                    if not self.camera.isOpened():
+                        # Try V4L2 (Video for Linux 2) explicitly
+                        self.camera = cv2.VideoCapture(device_id, cv2.CAP_V4L2)
+                    
+                    if self.camera.isOpened():
+                        logger.debug(f"Camera initialized on Linux/macOS")
+                except Exception as e:
+                    logger.error(f"Error with Linux camera initialization: {e}")
 
             if not self.camera.isOpened():
                 logger.error(f"Failed to open camera device {device_id} with any backend")

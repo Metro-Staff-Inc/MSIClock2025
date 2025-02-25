@@ -10,6 +10,7 @@ from admin_panel import show_admin_login, AdminPanel
 from soap_client import SoapClient
 from camera_service import CameraService
 from ui_theme import setup_theme
+from password_utils import hash_password
 
 # Import Windows-specific modules if on Windows
 if sys.platform == 'win32':
@@ -88,6 +89,50 @@ class TimeClock:
         logging.info(f"APPLICATION START - {datetime.now().strftime('%A, %B %d, %Y %I:%M:%S %p')}")
         logging.info("="*50)
         
+        # Check if this is first launch and show admin panel
+        if self.settings.get('ui', {}).get('firstLaunch', True):
+            logging.info("First launch detected, showing welcome dialog")
+            
+            # Create themed welcome dialog
+            welcome_dialog = customtkinter.CTkToplevel(self.root)
+            welcome_dialog.title("FIRST LAUNCH")
+            welcome_dialog.attributes('-topmost', True)
+            
+            # Set size and position
+            dialog_width = 400
+            dialog_height = 200
+            x = (welcome_dialog.winfo_screenwidth() - dialog_width) // 2
+            y = (welcome_dialog.winfo_screenheight() - dialog_height) // 2
+            welcome_dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
+            
+            # Add welcome message
+            customtkinter.CTkLabel(
+                welcome_dialog,
+                text="This is the first launch of the MSI Time Clock on this computer.\n\nPlease configure your settings in the admin panel.",
+                font=('IBM Plex Sans Medium', 14),
+                wraplength=350
+            ).pack(pady=20)
+            
+            # Add OK button
+            def on_welcome_close():
+                welcome_dialog.destroy()
+                # Show admin panel directly without password prompt
+                self.show_admin_panel_direct(first_launch=True)
+            
+            customtkinter.CTkButton(
+                welcome_dialog,
+                text="OK",
+                command=on_welcome_close,
+                width=100,
+                height=35,
+                fg_color="#A4D233",
+                hover_color="#8AB22B",
+                text_color="#000000"
+            ).pack(pady=20)
+            
+            welcome_dialog.transient(self.root)
+            welcome_dialog.grab_set()
+        
         # Schedule periodic tasks
         self.schedule_tasks()
         
@@ -99,7 +144,7 @@ class TimeClock:
             import ctypes
             from ctypes import wintypes
             
-            logging.info("Configuring Windows-specific focus settings")
+            logging.debug("Configuring Windows-specific focus settings")
             
             # Try to set the app as DPI aware to prevent scaling issues
             try:
@@ -143,12 +188,12 @@ class TimeClock:
                     shell32 = ctypes.WinDLL("shell32.dll")
                     
                     # Note: We've removed the SetSuspendState call that was causing hibernation issues
-                    logging.info("Windows notification settings configured")
+                    logging.debug("Windows notification settings configured")
                         
                 except Exception as e:
                     logging.warning(f"Failed to configure Windows notification settings: {e}")
                 
-                logging.info("Windows focus settings configured successfully")
+                logging.debug("Windows focus settings configured successfully")
             except Exception as e:
                 logging.warning(f"Failed to configure Windows focus settings: {e}")
                 
@@ -178,7 +223,8 @@ class TimeClock:
                 "fullscreen": True,
                 "language": "en",
                 "adminShortcut": "ctrl+alt+a",
-                "adminPassword": "Metro2024!"
+                "adminPassword": hash_password("Metro2024!"),
+                "firstLaunch": True
             },
             "storage": {
                 "retentionDays": 30,
@@ -202,13 +248,72 @@ class TimeClock:
 
     def load_settings(self):
         try:
-            # Try to load existing settings
+            # Get default settings structure
+            default_settings = {
+                "soap": {
+                    "username": "",
+                    "password": "",
+                    "endpoint": "http://msiwebtrax.com/",
+                    "timeout": 30,
+                    "clientId": 185
+                },
+                "camera": {
+                    "deviceId": 0,
+                    "captureQuality": 85,
+                    "resolution": {
+                        "width": 640,
+                        "height": 480
+                    }
+                },
+                "ui": {
+                    "fullscreen": True,
+                    "language": "en",
+                    "adminShortcut": "ctrl+alt+a",
+                    "adminPassword": "Metro2024!",
+                    "firstLaunch": True
+                },
+                "storage": {
+                    "retentionDays": 30,
+                    "dbPath": "data/local.db",
+                    "maxOfflineRecords": 10000
+                },
+                "logging": {
+                    "level": "INFO",
+                    "maxSize": 10485760,
+                    "backupCount": 5
+                }
+            }
+            
             try:
+                # Try to load existing settings
                 with open('settings.json', 'r') as f:
-                    return json.load(f)
+                    current_settings = json.load(f)
+                
+                logging.debug("Loaded current settings: %s", current_settings)
+                    
+                # Deep merge function to preserve existing values while adding missing ones
+                def deep_merge(source, destination):
+                    # Deep merge without modifying firstLaunch
+                    for key, value in source.items():
+                        if key in destination:
+                            if isinstance(value, dict) and isinstance(destination[key], dict):
+                                deep_merge(value, destination[key])
+                        else:
+                            destination[key] = value
+                    return destination
+                
+                # Merge settings, keeping existing values but adding any missing fields
+                merged_settings = deep_merge(default_settings, current_settings)
+                
+                # Ensure the settings are saved with any missing fields added
+                with open('settings.json', 'w') as f:
+                    json.dump(merged_settings, f, indent=2)
+                
+                return merged_settings
+                
             except FileNotFoundError:
                 # Create default settings if file doesn't exist
-                logging.info("Settings file not found, creating default settings")
+                logging.debug("Settings file not found, creating default settings")
                 return self.create_default_settings()
             except Exception as e:
                 logging.error(f"Failed to load settings: {e}")
@@ -246,9 +351,21 @@ class TimeClock:
             self.settings['ui'] = {}
         self.settings['ui']['scaling_factor'] = 1.0  # No scaling
         
-        # Set window icon if available
-        if os.path.exists('app.ico'):
-            self.root.iconbitmap('app.ico')
+        # Set window icon with platform-specific handling
+        try:
+            if sys.platform == 'win32':
+                # Windows uses .ico format
+                if os.path.exists('app.ico'):
+                    self.root.iconbitmap('app.ico')
+            else:
+                # Linux/macOS use different approach for icons with .png
+                icon_path = os.path.join('assets', 'people-dark-bg.png')
+                if os.path.exists(icon_path):
+                    from PIL import Image, ImageTk
+                    icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+                    self.root.iconphoto(True, icon_img)
+        except Exception as e:
+            logging.warning(f"Could not set application icon: {e}")
         
         # Configure basic window properties
         self.root.minsize(window_width, window_height)
@@ -276,7 +393,7 @@ class TimeClock:
             self.root.focus_force()
             
             # Log focus state
-            logging.info("Initial focus state: focused")
+            logging.debug("Initial focus state: focused")
         else:
             # For non-fullscreen mode, center the window
             x = (screen_width - window_width) // 2
@@ -354,7 +471,7 @@ class TimeClock:
         """Sync offline punch data"""
         try:
             results = self.soap_client.sync_offline_punches()
-            logging.info(f"Offline sync results: {results}")
+            logging.debug(f"Offline sync results: {results}")
         except Exception as e:
             logging.error(f"Failed to sync offline data: {e}")
         finally:
@@ -365,7 +482,7 @@ class TimeClock:
         """Clean up old records"""
         try:
             count = self.soap_client.cleanup_old_records()
-            logging.info(f"Cleaned up {count} old records")
+            logging.debug(f"Cleaned up {count} old records")
         except Exception as e:
             logging.error(f"Failed to cleanup old records: {e}")
         finally:
@@ -389,34 +506,51 @@ class TimeClock:
             # Reschedule
             self.root.after(3600000, self.check_camera)
 
-    def show_admin_dialog(self, event=None):
-        """Show admin login dialog"""
-        def on_login(success: bool):
-            if success:
-                # Create admin panel as a Toplevel window
-                admin_panel = AdminPanel(self.root)
-                
-                # Get screen dimensions
-                screen_width = admin_panel.winfo_screenwidth()
-                screen_height = admin_panel.winfo_screenheight()
-                
-                # Set size based on screen dimensions
-                panel_width = int(screen_width * 0.8)  # 80% of screen width
-                panel_height = int(screen_height * 0.8)  # 80% of screen height
-                
-                # Center the window
-                x = (screen_width - panel_width) // 2
-                y = (screen_height - panel_height) // 2
-                
-                # Set geometry and properties
-                admin_panel.geometry(f"{panel_width}x{panel_height}+{x}+{y}")
-                admin_panel.minsize(800, 600)
-                admin_panel.attributes('-topmost', True)  # Keep on top
-                admin_panel.transient(self.root)  # Set as transient to main window
-                admin_panel.grab_set()  # Make 008000it modal
-                admin_panel.focus_force()  # Ensure focus
+    def show_admin_panel_direct(self, first_launch=False):
+        """Show admin panel directly without password prompt"""
+        # Create admin panel as a Toplevel window with settings path
+        admin_panel = AdminPanel(self.root, settings_path='settings.json')
+        logging.debug("Created admin panel with settings path")
         
-        show_admin_login(self.root, on_login)
+        # Get screen dimensions
+        screen_width = admin_panel.winfo_screenwidth()
+        screen_height = admin_panel.winfo_screenheight()
+        
+        # Set size based on screen dimensions
+        panel_width = int(screen_width * 0.8)  # 80% of screen width
+        panel_height = int(screen_height * 0.8)  # 80% of screen height
+        
+        # Center the window
+        x = (screen_width - panel_width) // 2
+        y = (screen_height - panel_height) // 2
+        
+        # Set geometry and properties
+        admin_panel.geometry(f"{panel_width}x{panel_height}+{x}+{y}")
+        admin_panel.minsize(800, 600)
+        admin_panel.attributes('-topmost', True)  # Keep on top
+        admin_panel.transient(self.root)  # Set as transient to main window
+        admin_panel.grab_set()  # Make it modal
+        admin_panel.focus_force()  # Ensure focus
+
+        # If this is first launch, update the flag when admin panel is closed
+        if first_launch:
+            def on_admin_close():
+                admin_panel.destroy()
+            
+            admin_panel.protocol("WM_DELETE_WINDOW", on_admin_close)
+
+    def show_admin_dialog(self, event=None, first_launch=False):
+        """Show admin login dialog"""
+        if first_launch:
+            # Skip password prompt on first launch
+            self.show_admin_panel_direct(first_launch=True)
+        else:
+            def on_login(success: bool):
+                if success:
+                    logging.debug("Admin login successful, showing admin panel")
+                    self.show_admin_panel_direct(first_launch=False)
+            
+            show_admin_login(self.root, on_login)
 
     # Focus event handlers removed
     

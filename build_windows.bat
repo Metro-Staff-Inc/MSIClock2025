@@ -24,12 +24,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-
-python -m pip install pillow
-if errorlevel 1 (
-    echo Failed to install pillow
-    pause
-    exit /b 1
+REM No need to install Pillow separately as it's already in requirements.txt
 )
 
 echo Dependencies installed successfully
@@ -67,9 +62,9 @@ echo         VarFileInfo([VarStruct(u'Translation', [1033, 1200])]) >> file_vers
 echo     ] >> file_version_info.txt
 echo ) >> file_version_info.txt
 
-REM Create application icon
-echo Creating application icon...
-python -c "from PIL import Image; img = Image.new('RGBA', (256, 256), (152, 199, 58)); img.save('app.ico')"
+REM Convert PNG icon to ICO format
+echo Converting application icon...
+python -c "from PIL import Image; img = Image.open('assets/people-dark-bg.png'); img.save('app.ico')"
 
 REM Clean previous build
 echo Cleaning previous build...
@@ -113,10 +108,15 @@ echo    File "settings.json" >> installer.nsi
 echo    CreateDirectory "$SMPROGRAMS\MSI Time Clock" >> installer.nsi
 echo    CreateShortCut "$SMPROGRAMS\MSI Time Clock\MSI Time Clock.lnk" "$INSTDIR\MSITimeClock.exe" >> installer.nsi
 echo    CreateShortCut "$DESKTOP\MSI Time Clock.lnk" "$INSTDIR\MSITimeClock.exe" >> installer.nsi
-echo    ; Create directories >> installer.nsi
+echo    ; Create required directories >> installer.nsi
 echo    CreateDirectory "$INSTDIR\logs" >> installer.nsi
 echo    CreateDirectory "$INSTDIR\photos" >> installer.nsi
 echo    CreateDirectory "$INSTDIR\data" >> installer.nsi
+echo    ; Add assets directory >> installer.nsi
+echo    CreateDirectory "$INSTDIR\assets" >> installer.nsi
+echo    CreateDirectory "$INSTDIR\assets\fonts" >> installer.nsi
+echo    SetOutPath "$INSTDIR\assets" >> installer.nsi
+echo    File /r "dist\assets\*.*" >> installer.nsi
 echo    ; Set permissions using cacls >> installer.nsi
 echo    ExecWait 'cacls "$INSTDIR\logs" /E /T /G Users:F' >> installer.nsi
 echo    ExecWait 'cacls "$INSTDIR\photos" /E /T /G Users:F' >> installer.nsi

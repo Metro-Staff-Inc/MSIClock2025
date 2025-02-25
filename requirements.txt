@@ -5,13 +5,13 @@ zeep>=4.2.1         # SOAP client
 requests>=2.31.0    # HTTP client for SOAP
 lxml>=4.9.3         # XML processing for SOAP
 urllib3>=2.0.0      # HTTP client
+bcrypt>=4.0.1       # Password hashing
 pywin32>=306; platform_system == "Windows"  # Windows-specific features
 ultralytics>=8.0.0  # YOLOv8 for person detection
 customtkinter>=5.2.2  # Modern UI framework
 
 # Build dependencies
 pyinstaller>=6.3.0  # Creating executable
-pillow>=10.0.0      # Icon generation
 
 # Development dependencies
 black>=23.7.0       # Code formatting

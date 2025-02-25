@@ -1,6 +1,6 @@
 {
   "soap": {
-    "username": "SG360WolfMainRight",
+    "username": "SG360WolfMainLeft",
     "password": "summer2014",
     "endpoint": "http://msiwebtrax.com/",
     "timeout": 30,
@@ -20,7 +20,8 @@
     "fullscreen": true,
     "language": "en",
     "adminShortcut": "<Control-Alt-a>",
-    "adminPassword": "123"
+    "adminPassword": "$2b$12$sF93kVT4aL8vW2XE50yzGe6TesLEfvBjHuFQTeWmY4yjuKEBmOVLS",
+    "firstLaunch": false
   },
   "storage": {
     "retentionDays": 30,

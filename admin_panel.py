@@ -5,6 +5,7 @@ import os
 from typing import Callable, Dict, Any
 from camera_service import CameraService
 from ui_theme import StatusColors
+from password_utils import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ def show_admin_login(parent, callback: Callable[[bool], None]):
         
         # Scale dialog size
         width = 300
-        height = 150
+        height = 180
         
         # Center on screen
         x = (dialog.winfo_screenwidth() - width) // 2
@@ -65,7 +66,7 @@ def show_admin_login(parent, callback: Callable[[bool], None]):
         
         def submit():
             entered_password = password_var.get().strip()
-            if entered_password == settings['ui']['adminPassword']:
+            if verify_password(entered_password, settings['ui']['adminPassword']):
                 dialog.destroy()
                 callback(True)
             else:
@@ -104,20 +105,30 @@ def show_admin_login(parent, callback: Callable[[bool], None]):
                 error_dialog.grab_set()
                 callback(False)
         
-        # Add submit button
-        customtkinter.CTkButton(
+        # Debug message to verify our changes are running
+        logger.debug("Creating admin login dialog with improved formatting")
+        
+        # Add submit button with improved formatting
+        submit_button = customtkinter.CTkButton(
             dialog,
             text="Submit",
             command=submit,
-            font=scaled_fonts['button']
-        ).pack(pady=(10, 20))
+            font=scaled_fonts['button'],
+        ).pack(pady=10)
+        logger.debug("Submit button created with improved formatting")
         
-        # Focus the entry
-        entry.focus_set()
-        
-        # Bind Enter key and focus
+        # Bind Enter key
         entry.bind("<Return>", lambda e: submit())
-        entry.focus_set()
+        
+        # Ensure focus using multiple methods
+        def set_focus():
+            logger.debug("Setting focus to password entry field")
+            entry.focus_set()
+            entry.focus_force()  # Force focus
+        
+        # Schedule focus after dialog is fully created and visible
+        dialog.after(100, set_focus)
+        dialog.after(500, set_focus)  # Try again after 500ms to be sure
             
     except Exception as e:
         logger.error(f"Failed to show admin login dialog: {e}")
@@ -127,7 +138,9 @@ class AdminPanel(customtkinter.CTkToplevel):
     def __init__(self, parent, settings_path: str = 'settings.json'):
         super().__init__(parent)
         self.settings_path = settings_path
-        self.settings = self.load_settings()
+        
+        # Don't store settings in memory, always read from disk
+        logger.debug("Admin panel initialized")
         
         # Get screen dimensions
         screen_width = self.winfo_screenwidth()
@@ -168,7 +181,10 @@ class AdminPanel(customtkinter.CTkToplevel):
         # Make it modal and ensure proper window management
         self.transient(parent)
         self.attributes('-topmost', True)
+        # Ensure window close events are handled
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.bind('<Escape>', lambda e: self.on_close())
+        logger.debug("Window close handlers configured")
         
         # Ensure window is ready before grabbing focus
         self.update_idletasks()
@@ -181,18 +197,22 @@ class AdminPanel(customtkinter.CTkToplevel):
         
         self.create_widgets()
         self.load_current_settings()
-        
-        # Handle window close button
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def load_settings(self) -> Dict[str, Any]:
         try:
             with open(self.settings_path, 'r') as f:
-                return json.load(f)
+                settings = json.load(f)
+                logger.debug("Successfully loaded settings in admin panel")
+                return settings
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
             self.show_error(f"Failed to load settings: {e}")
-            return {}
+            # Return default settings structure
+            return {
+                "ui": {
+                    "firstLaunch": True
+                }
+            }
 
     def show_error(self, message: str):
         """Show error dialog"""
@@ -548,24 +568,39 @@ class AdminPanel(customtkinter.CTkToplevel):
         ).grid(row=control_row, column=0, sticky="w", padx=10, pady=5)
 
     def load_current_settings(self):
-        # Load admin settings
-        self.new_password_var.set("")
-        self.confirm_password_var.set("")
+        try:
+            # Read settings from disk
+            with open(self.settings_path, 'r') as f:
+                settings = json.load(f)
+                logger.debug("Loaded current settings from disk")
 
-        # Load SOAP settings
-        self.client_id_var.set(str(self.settings['soap']['clientId']))
-        self.username_var.set(self.settings['soap']['username'])
-        self.password_var.set(self.settings['soap']['password'])
-        
-        # Load storage settings
-        self.retention_var.set(str(self.settings['storage']['retentionDays']))
-        
-        # Load camera settings
-        self.device_id_var.set(str(self.settings['camera']['deviceId']))
-        self.quality_var.set(str(self.settings['camera']['captureQuality']))
+            # Load admin settings
+            self.new_password_var.set("")
+            self.confirm_password_var.set("")
+
+            # Load SOAP settings
+            self.client_id_var.set(str(settings['soap']['clientId']))
+            self.username_var.set(settings['soap']['username'])
+            self.password_var.set(settings['soap']['password'])
+            
+            # Load storage settings
+            self.retention_var.set(str(settings['storage']['retentionDays']))
+            
+            # Load camera settings
+            self.device_id_var.set(str(settings['camera']['deviceId']))
+            self.quality_var.set(str(settings['camera']['captureQuality']))
+            
+        except Exception as e:
+            logger.error(f"Failed to load current settings: {e}")
+            self.show_error(f"Failed to load settings: {e}")
 
     def save_settings(self):
         try:
+            # Load current settings to ensure we have the latest
+            with open(self.settings_path, 'r') as f:
+                current_settings = json.load(f)
+                logger.debug("Read current settings for saving")
+            
             # Validate admin password change
             new_password = self.new_password_var.get()
             confirm_password = self.confirm_password_var.get()
@@ -574,28 +609,59 @@ class AdminPanel(customtkinter.CTkToplevel):
                 if new_password != confirm_password:
                     self.show_error("New password and confirm password do not match")
                     return
-                self.settings['ui']['adminPassword'] = new_password
+                # Hash the new password before saving
+                current_settings['ui']['adminPassword'] = hash_password(new_password)
 
             # SOAP settings
-            self.settings['soap']['clientId'] = int(self.client_id_var.get())
-            self.settings['soap']['username'] = self.username_var.get()
-            self.settings['soap']['password'] = self.password_var.get()
-            self.settings['storage']['retentionDays'] = int(self.retention_var.get())
-            self.settings['camera']['deviceId'] = int(self.device_id_var.get())
-            self.settings['camera']['captureQuality'] = int(self.quality_var.get())
+            current_settings['soap']['clientId'] = int(self.client_id_var.get())
+            current_settings['soap']['username'] = self.username_var.get()
+            current_settings['soap']['password'] = self.password_var.get()
+            current_settings['storage']['retentionDays'] = int(self.retention_var.get())
+            current_settings['camera']['deviceId'] = int(self.device_id_var.get())
+            current_settings['camera']['captureQuality'] = int(self.quality_var.get())
             
-            # Save to file
+            # Write settings with explicit flush
             with open(self.settings_path, 'w') as f:
-                json.dump(self.settings, f, indent=2)
+                json.dump(current_settings, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+                logger.debug("Settings saved and synced to disk")
             
+            # Create success dialog
             dialog = customtkinter.CTkToplevel(self)
             dialog.title("Success")
-            dialog.geometry("200x100")
             dialog.transient(self)
             dialog.grab_set()
             
-            customtkinter.CTkLabel(dialog, text="Settings saved successfully").pack(pady=10)
-            customtkinter.CTkButton(dialog, text="OK", command=dialog.destroy).pack()
+            # Set size and position
+            width = 300
+            height = 150
+            x = (dialog.winfo_screenwidth() - width) // 2
+            y = (dialog.winfo_screenheight() - height) // 2
+            dialog.geometry(f"{width}x{height}+{x}+{y}")
+            
+            # Add message with theme font
+            customtkinter.CTkLabel(
+                dialog,
+                text="Settings saved successfully",
+                font=self.scaled_fonts['text']
+            ).pack(pady=20)
+            
+            # Add themed button
+            customtkinter.CTkButton(
+                dialog,
+                text="OK",
+                command=dialog.destroy,
+                font=self.scaled_fonts['button'],
+                fg_color="#A4D233",
+                hover_color="#8AB22B",
+                text_color="#000000",
+                height=35
+            ).pack(pady=10)
+            
+            # Ensure dialog stays on top
+            dialog.lift()
+            dialog.focus_force()
             
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")
@@ -647,14 +713,41 @@ class AdminPanel(customtkinter.CTkToplevel):
             self.log_text.delete("1.0", "end")
             self.log_text.insert("1.0", "Logs cleared")
             
+            # Create success dialog
             dialog = customtkinter.CTkToplevel(self)
             dialog.title("Success")
-            dialog.geometry("200x100")
             dialog.transient(self)
             dialog.grab_set()
             
-            customtkinter.CTkLabel(dialog, text="Logs cleared successfully").pack(pady=10)
-            customtkinter.CTkButton(dialog, text="OK", command=dialog.destroy).pack()
+            # Set size and position
+            width = 300
+            height = 150
+            x = (dialog.winfo_screenwidth() - width) // 2
+            y = (dialog.winfo_screenheight() - height) // 2
+            dialog.geometry(f"{width}x{height}+{x}+{y}")
+            
+            # Add message with theme font
+            customtkinter.CTkLabel(
+                dialog,
+                text="Logs cleared successfully",
+                font=self.scaled_fonts['text']
+            ).pack(pady=20)
+            
+            # Add themed button
+            customtkinter.CTkButton(
+                dialog,
+                text="OK",
+                command=dialog.destroy,
+                font=self.scaled_fonts['button'],
+                fg_color="#A4D233",
+                hover_color="#8AB22B",
+                text_color="#000000",
+                height=35
+            ).pack(pady=10)
+            
+            # Ensure dialog stays on top
+            dialog.lift()
+            dialog.focus_force()
             
         except Exception as e:
             logger.error(f"Failed to clear logs: {e}")
@@ -669,33 +762,81 @@ class AdminPanel(customtkinter.CTkToplevel):
         self.show_error("Connection test not implemented yet")
 
     def on_close(self):
-        self.destroy()
+        try:
+            # Simple direct update of firstLaunch
+            with open(self.settings_path, 'r+') as f:
+                settings = json.load(f)
+                if 'ui' not in settings:
+                    settings['ui'] = {}
+                settings['ui']['firstLaunch'] = False
+                f.seek(0)
+                f.truncate()
+                json.dump(settings, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+                logger.debug("Set firstLaunch to false and saved settings")
+        except Exception as e:
+            logger.error(f"Failed to update firstLaunch setting: {e}")
+        finally:
+            self.destroy()
 
     def close_program(self):
+        # Create confirm dialog
         dialog = customtkinter.CTkToplevel(self)
         dialog.title("Confirm Close")
-        dialog.geometry("300x150")
         dialog.transient(self)
         dialog.grab_set()
         
-        # Center dialog on screen
-        dialog.lift()
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() - 300) // 2
-        y = (dialog.winfo_screenheight() - 150) // 2
-        dialog.geometry(f"+{x}+{y}")
+        # Set size and position
+        width = 400
+        height = 200
+        x = (dialog.winfo_screenwidth() - width) // 2
+        y = (dialog.winfo_screenheight() - height) // 2
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
         
-        customtkinter.CTkLabel(dialog, text="Are you sure you want to close the program?", wraplength=250).pack(pady=10)
+        # Add message with theme font
+        customtkinter.CTkLabel(
+            dialog,
+            text="Are you sure you want to close the program?",
+            wraplength=300,
+            font=self.scaled_fonts['text']
+        ).pack(pady=20)
         
+        # Create button frame
         button_frame = customtkinter.CTkFrame(dialog)
-        button_frame.pack(fill="x", padx=20)
+        button_frame.pack(fill="x", padx=20, pady=10)
         
-        customtkinter.CTkButton(button_frame, text="Yes", 
-                              command=lambda: [dialog.destroy(), self.master.quit()],
-                              fg_color=StatusColors.ERROR,
-                              hover_color="#CC2F26").pack(side="left", padx=5)
-        customtkinter.CTkButton(button_frame, text="No", 
-                              command=dialog.destroy).pack(side="left")
+        def on_yes():
+            logger.debug("Closing program through system tab")
+            dialog.destroy()
+            self.on_close()  # Ensure settings are saved
+            self.master.quit()
+        
+        # Add themed buttons
+        customtkinter.CTkButton(
+            button_frame,
+            text="Yes",
+            command=on_yes,
+            font=self.scaled_fonts['button'],
+            fg_color=StatusColors.ERROR,
+            hover_color="#CC2F26",
+            height=35
+        ).pack(side="left", padx=5)
+        
+        customtkinter.CTkButton(
+            button_frame,
+            text="No",
+            command=dialog.destroy,
+            font=self.scaled_fonts['button'],
+            fg_color="#A4D233",
+            hover_color="#8AB22B",
+            text_color="#000000",
+            height=35
+        ).pack(side="left", padx=5)
+        
+        # Ensure dialog stays on top
+        dialog.lift()
+        dialog.focus_force()
 
 if __name__ == "__main__":
     # Test admin panel

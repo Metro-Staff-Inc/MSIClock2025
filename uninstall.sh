@@ -40,4 +40,4 @@ echo
 echo "Note: Python packages and system dependencies were not removed."
 echo "To remove them manually:"
 echo "1. pip3 uninstall -r requirements.txt"
-echo "2. apt-get remove python3-tk python3-pip python3-opencv"
+echo "2. apt-get remove python3-tk python3-pip python3-opencv libsm6 libxext6 libxrender1 libgl1-mesa-glx v4l-utils"

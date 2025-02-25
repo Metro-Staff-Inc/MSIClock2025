@@ -203,6 +203,9 @@ class TimeClockUI(customtkinter.CTkFrame):
         
         # Initialize UI state after widget is fully created
         self.after(100, self.reset_ui)
+        
+        # Start periodic check for entry field focus
+        self.after(1000, self.check_entry_focus)
 
     def show_admin_panel(self, event=None):
         """Show the admin panel"""
@@ -452,6 +455,20 @@ class TimeClockUI(customtkinter.CTkFrame):
                 self.reset_ui()
                 self.after(100, lambda: self.id_entry.focus_set())
             self.after(3000, reset_with_focus)
+    
+    def check_entry_focus(self):
+        """Periodically check if the entry field has focus and set it if it doesn't"""
+        try:
+            # Only check if the application is visible (has a mapping)
+            if self.winfo_ismapped() and self.winfo_toplevel().focus_get() != self.id_entry:
+                # Set focus to entry field, but don't try to force the window to the foreground
+                logger.debug("Entry field lost focus, resetting focus")
+                self.id_entry.focus_set()
+        except Exception as e:
+            logger.error(f"Error in check_entry_focus: {e}")
+        finally:
+            # Reschedule check every 2 seconds
+            self.after(2000, self.check_entry_focus)
 
 if __name__ == "__main__":
     # Test UI

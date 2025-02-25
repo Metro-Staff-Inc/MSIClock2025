@@ -14,7 +14,18 @@ read -p "Enter username for service file: " USERNAME
 
 echo "Installing system dependencies..."
 apt-get update
-apt-get install -y python3-tk python3-pip python3-opencv nvidia-cuda-toolkit
+apt-get install -y python3-tk python3-pip python3-opencv
+
+# Install additional dependencies for OpenCV and camera handling on Linux
+apt-get install -y libsm6 libxext6 libxrender1 libgl1-mesa-glx v4l-utils
+
+# Install CUDA only if needed and available
+if lspci | grep -i nvidia > /dev/null; then
+    echo "NVIDIA GPU detected, installing CUDA toolkit..."
+    apt-get install -y nvidia-cuda-toolkit
+else
+    echo "No NVIDIA GPU detected, skipping CUDA toolkit..."
+fi
 
 echo "Installing Python dependencies..."
 pip3 install -r requirements.txt
@@ -39,6 +50,18 @@ echo "Setting permissions..."
 chown -R $USERNAME:$USERNAME .
 chmod 755 main.py
 
+echo "Creating desktop entry..."
+cat > /usr/share/applications/MSITimeClock.desktop << EOL
+[Desktop Entry]
+Type=Application
+Name=MSI Time Clock
+Comment=Metro Staff Inc Time Clock Application
+Exec=/usr/bin/python3 $(pwd)/main.py
+Icon=$(pwd)/assets/people-dark-bg.png
+Terminal=false
+Categories=Utility;Office;
+EOL
+
 echo "Creating systemd service..."
 cat > /etc/systemd/system/timeclock.service << EOL
 [Unit]
@@ -59,8 +82,13 @@ EOL
 echo "Enabling service..."
 systemctl enable timeclock
 
-echo "Adding user to required groups..."
+echo "Adding user to required groups for camera access..."
 usermod -a -G video $USERNAME
+usermod -a -G input $USERNAME
+
+# Ensure proper permissions on camera devices
+echo "Setting permissions on camera devices..."
+chmod a+rw /dev/video*
 
 echo "Installation complete!"
 echo
