@@ -85,9 +85,6 @@ class CameraPreview(customtkinter.CTkFrame):
         aspect_ratio = camera_height / camera_width
         self.height = int(self.width * aspect_ratio)
         
-        logger.info(f"Camera resolution: {camera_width}x{camera_height}")
-        logger.info(f"Aspect ratio: {aspect_ratio:.3f}")
-        logger.info(f"Preview dimensions: {self.width}x{self.height}")
         
         # Create frame for preview
         self.preview_frame = customtkinter.CTkFrame(
@@ -189,6 +186,9 @@ class TimeClockUI(customtkinter.CTkFrame):
         self.employee_id = customtkinter.StringVar()
         self.status_text = customtkinter.StringVar()
         self.status_text_es = customtkinter.StringVar()
+        
+        # Flag to track if admin panel is open
+        self.admin_panel_open = False
         
         self.create_widgets()
         

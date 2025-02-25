@@ -60,21 +60,39 @@ class SoapClient:
                 PWD=self.settings['soap']['password']
             )
             
-            logger.info("SOAP clients initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize SOAP clients: {e}")
             raise
 
     def record_punch(self, employee_id: str, punch_time: datetime,
-                    department_override: Optional[int] = None) -> Dict[str, Any]:
+                    department_override: Optional[int] = None, image_data: Optional[bytes] = None) -> Dict[str, Any]:
         """
         Record a punch for an employee, handling both online and offline scenarios
+        
+        Args:
+            employee_id: Employee's ID number
+            punch_time: Timestamp for the punch
+            department_override: Optional department code
+            
+        Sends: "{employee_id}|*|{punch_time}|*|{department_override}"
+        
+        Returns response containing:
+            - PunchSuccess: Whether punch was recorded
+            - PunchType: "checkin" or "checkout"
+            - FirstName: Employee's first name
+            - LastName: Employee's last name
+            - PunchException: Any punch exceptions
+            - WeeklyHours: Current week's hours (if available)
         """
         try:
             # Format the swipe input string
             swipe_input = f"{employee_id}|*|{punch_time.isoformat()}"
             if department_override:
                 swipe_input += f"|*|{department_override}"
+                
+            # Log punch attempt
+            filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
+            logger.info(f"PUNCH SEND: {employee_id}, {punch_time.isoformat()}, {filename}")
 
             # Try online punch first
             try:
@@ -90,7 +108,7 @@ class SoapClient:
                         swipeInput=swipe_input
                     )
                 
-                return self._format_response(response, True)
+                return self._format_response(response, True, employee_id)
 
             except (Fault, TransportError, RequestException) as e:
                 logger.warning(f"Online punch failed, storing offline: {e}")
@@ -102,13 +120,25 @@ class SoapClient:
 
     def _upload_image(self, employee_id: str, image_data: bytes, 
                      punch_time: datetime) -> bool:
-        """Upload captured image to the server"""
+        """Upload captured image to the server
+        
+        Args:
+            employee_id: Employee's ID number
+            image_data: JPEG image as bytes
+            punch_time: Timestamp for the photo
+            
+        Sends:
+            - fileName: "{employee_id}__{timestamp}.jpg"
+            - data: JPEG image bytes
+            - dir: Client ID for storage directory
+            
+        Returns:
+            bool: True if upload successful, False otherwise
+        """
         try:
             filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
             client_id = str(self.settings['soap']['clientId'])
             
-            logger.info(f"Attempting to save image: {filename}")
-            logger.info(f"Client ID directory: {client_id}")
             
             try:
                 response = self.checkin_client.service.SaveImage(
@@ -118,9 +148,6 @@ class SoapClient:
                     dir=client_id
                 )
                 
-                # Log the raw response for debugging
-                logger.info(f"SaveImage raw response: {response}")
-                
                 # Check for system error codes
                 if hasattr(response, 'SystemErrorCode'):
                     error_code = response.SystemErrorCode
@@ -128,9 +155,7 @@ class SoapClient:
                         logger.error(f"SaveImage error code: {error_code}")
                         return False
                 
-                success = True if response else False
-                logger.info(f"Image upload {'successful' if success else 'failed'}")
-                return success
+                return True if response else False
                 
             except Exception as e:
                 logger.error(f"SaveImage SOAP call failed: {str(e)}")
@@ -222,7 +247,7 @@ class SoapClient:
             logger.error(f"Failed to sync offline punches: {e}")
             raise
 
-    def _format_response(self, soap_response: Any, online: bool = True) -> Dict[str, Any]:
+    def _format_response(self, soap_response: Any, online: bool = True, employee_id: Optional[str] = None) -> Dict[str, Any]:
         """Format the SOAP response into a standardized dictionary"""
         if not online:
             return {
@@ -251,7 +276,7 @@ class SoapClient:
                     'error_code': error_code
                 }
 
-        return {
+        response = {
             'success': soap_response.RecordSwipeReturnInfo.PunchSuccess,
             'offline': False,
             'punchType': soap_response.RecordSwipeReturnInfo.PunchType,
@@ -260,6 +285,16 @@ class SoapClient:
             'exception': soap_response.RecordSwipeReturnInfo.PunchException,
             'weeklyHours': soap_response.CurrentWeeklyHours if hasattr(soap_response, 'CurrentWeeklyHours') else None
         }
+        
+        # Log punch response
+        logger.info(
+            f"PUNCH RESPONSE: {employee_id}, "
+            f"{response['lastName']}, {response['firstName']}, "
+            f"{response['success']}, {response['punchType']}, "
+            f"{response['weeklyHours'] if response['weeklyHours'] is not None else 'N/A'}"
+        )
+        
+        return response
 
     def cleanup_old_records(self) -> int:
         """Remove old offline records based on retention policy"""
@@ -279,7 +314,6 @@ class SoapClient:
             conn.commit()
             conn.close()
             
-            logger.info(f"Cleaned up {deleted_count} old records")
             return deleted_count
             
         except Exception as e:
