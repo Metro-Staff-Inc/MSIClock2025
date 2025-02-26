@@ -81,6 +81,10 @@ if not exist "dist\MSITimeClock.exe" (
     exit /b 1
 )
 
+REM Copy assets directory to dist
+echo Copying assets to dist...
+xcopy /E /I /Y assets dist\assets
+
 REM Create installer
 echo Creating installer...
 echo RequestExecutionLevel admin > installer.nsi
@@ -118,9 +122,10 @@ echo    CreateDirectory "$INSTDIR\assets\fonts" >> installer.nsi
 echo    SetOutPath "$INSTDIR\assets" >> installer.nsi
 echo    File /r "dist\assets\*.*" >> installer.nsi
 echo    ; Set permissions using cacls >> installer.nsi
-echo    ExecWait 'cacls "$INSTDIR\logs" /E /T /G Users:F' >> installer.nsi
-echo    ExecWait 'cacls "$INSTDIR\photos" /E /T /G Users:F' >> installer.nsi
-echo    ExecWait 'cacls "$INSTDIR\data" /E /T /G Users:F' >> installer.nsi
+echo    ExecWait 'icacls "$INSTDIR\logs" /grant "Users":(OI)(CI)F' >> installer.nsi
+echo    ExecWait 'icacls "$INSTDIR\photos" /grant "Users":(OI)(CI)F' >> installer.nsi
+echo    ExecWait 'icacls "$INSTDIR\data" /grant "Users":(OI)(CI)F' >> installer.nsi
+echo    ExecWait 'icacls "$INSTDIR\settings.json" /grant "Users":F' >> installer.nsi
 echo SectionEnd >> installer.nsi
 echo. >> installer.nsi
 echo Section -Post >> installer.nsi

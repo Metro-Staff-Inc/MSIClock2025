@@ -23,10 +23,15 @@ Section "MainSection" SEC01
    CreateDirectory "$SMPROGRAMS\MSI Time Clock" 
    CreateShortCut "$SMPROGRAMS\MSI Time Clock\MSI Time Clock.lnk" "$INSTDIR\MSITimeClock.exe" 
    CreateShortCut "$DESKTOP\MSI Time Clock.lnk" "$INSTDIR\MSITimeClock.exe" 
-   ; Create directories 
+   ; Create required directories 
    CreateDirectory "$INSTDIR\logs" 
    CreateDirectory "$INSTDIR\photos" 
    CreateDirectory "$INSTDIR\data" 
+   ; Add assets directory 
+   CreateDirectory "$INSTDIR\assets" 
+   CreateDirectory "$INSTDIR\assets\fonts" 
+   SetOutPath "$INSTDIR\assets" 
+   File /r "dist\assets\*.*" 
    ; Set permissions using cacls 
    ExecWait 'cacls "$INSTDIR\logs" /E /T /G Users:F' 
    ExecWait 'cacls "$INSTDIR\photos" /E /T /G Users:F' 

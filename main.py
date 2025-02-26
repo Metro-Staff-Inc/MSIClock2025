@@ -12,15 +12,6 @@ from camera_service import CameraService
 from ui_theme import setup_theme
 from password_utils import hash_password
 
-# Import Windows-specific modules if on Windows
-if sys.platform == 'win32':
-    try:
-        import win32gui
-        import win32con
-        import win32api
-    except ImportError:
-        logging.warning("win32 modules not available. Some focus management features will be disabled.")
-
 # Configure logging
 def setup_logging():
     log_dir = "logs"
@@ -75,10 +66,6 @@ def setup_logging():
 class TimeClock:
     def __init__(self):
         self.settings = self.load_settings()
-        
-        # Configure Windows-specific focus settings
-        if sys.platform == 'win32':
-            self.configure_windows_focus()
             
         self.setup_root_window()
         self.init_services()
@@ -367,38 +354,65 @@ class TimeClock:
         except Exception as e:
             logging.warning(f"Could not set application icon: {e}")
         
-        # Configure basic window properties
-        self.root.minsize(window_width, window_height)
-        self.root.maxsize(window_width, window_height)
-        self.root.resizable(False, False)
+        # Only set size constraints in windowed mode
+        if not self.settings['ui'].get('fullscreen', True):
+            self.root.minsize(window_width, window_height)
+            self.root.maxsize(window_width, window_height)
+            self.root.resizable(False, False)
         
         if self.settings['ui'].get('fullscreen', True):
-            # Remove window decorations first
-            self.root.overrideredirect(True)
+            # Set initial position and size
+            self.root.geometry(f"{screen_width}x{screen_height}+0+0")
             
-            # Set window properties
+            # Remove window decorations and set topmost
+            self.root.overrideredirect(True)
             self.root.attributes('-topmost', True)
             
-            # Calculate position to center the window
-            x = (screen_width - window_width) // 2
-            y = (screen_height - window_height) // 2
+            # Create and configure content frame
+            content_frame = customtkinter.CTkFrame(self.root, width=window_width, height=window_height)
+            content_frame.pack_propagate(False)  # Prevent frame from shrinking
             
-            # Position window at center
-            self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+            # Force position to top-left
+            content_frame.place(x=0, y=0)
+            
+            # Store frame for later use
+            self.content_frame = content_frame
             
             # Update to ensure geometry is applied
             self.root.update_idletasks()
             
             # Ensure window is properly focused
             self.root.focus_force()
+            logging.debug("Initial focus state: focused (fullscreen)")
             
-            # Log focus state
-            logging.debug("Initial focus state: focused")
+            # Bind configuration event to maintain position
+            def maintain_position(event=None):
+                self.root.geometry(f"{screen_width}x{screen_height}+0+0")
+                content_frame.place(x=0, y=0)
+            
+            self.root.bind("<Configure>", maintain_position)
         else:
-            # For non-fullscreen mode, center the window
-            x = (screen_width - window_width) // 2
-            y = (screen_height - window_height) // 2
-            self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+            # For windowed mode
+            self.root.geometry(f"{window_width}x{window_height}+0+0")
+            
+            # Create and configure content frame
+            content_frame = customtkinter.CTkFrame(self.root, width=window_width, height=window_height)
+            content_frame.pack_propagate(False)
+            content_frame.pack(fill="both", expand=True)
+            
+            # Store frame for later use
+            self.content_frame = content_frame
+            
+            # Update to ensure geometry is applied
+            self.root.update_idletasks()
+            
+            # Bind configuration event to maintain position
+            def maintain_position(event=None):
+                self.root.geometry(f"{window_width}x{window_height}+0+0")
+            
+            self.root.bind("<Configure>", maintain_position)
+            
+            logging.debug("Initial focus state: focused (windowed)")
             
         # Ensure window is ready and visible
         self.root.update_idletasks()
@@ -434,8 +448,8 @@ class TimeClock:
             )
 
     def create_ui(self):
-        # Create main UI with settings
-        self.time_clock_ui = TimeClockUI(self.root, settings=self.settings)
+        # Create main UI with settings in the content frame
+        self.time_clock_ui = TimeClockUI(self.content_frame, settings=self.settings)
         self.time_clock_ui.pack(fill="both", expand=True)
 
     def schedule_tasks(self):
