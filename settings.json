@@ -13,20 +13,20 @@
       "width": 640,
       "height": 480
     },
-    "maxWidth": 640,
-    "maxHeight": 480
+    "maxWidth": 320,
+    "maxHeight": 320
   },
   "ui": {
     "fullscreen": true,
     "language": "en",
     "adminShortcut": "<Control-Alt-a>",
     "adminPassword": "$2b$12$sF93kVT4aL8vW2XE50yzGe6TesLEfvBjHuFQTeWmY4yjuKEBmOVLS",
-    "firstLaunch": false
+    "firstLaunch": true
   },
   "storage": {
-    "retentionDays": 30,
+    "retentionDays": 60,
     "dbPath": "data/local.db",
-    "maxOfflineRecords": 10000
+    "maxOfflineRecords": 50000
   },
   "logging": {
     "level": "INFO",
