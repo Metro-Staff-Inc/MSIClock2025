@@ -8,6 +8,7 @@ import json
 from camera_service import CameraService
 from soap_client import SoapClient
 from ui_theme import StatusColors
+from punch_exceptions import PunchExceptions
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,8 @@ class TimeClockUI(customtkinter.CTkFrame):
         
         self.create_widgets()
         
+        # Admin panel is handled by main window
+        
         # Start camera preview
         self.camera_service.initialize()
         self.camera_preview.start_preview()
@@ -199,20 +202,26 @@ class TimeClockUI(customtkinter.CTkFrame):
         # Bind keyboard input
         self.bind('<Return>', self.process_punch)
         self.id_entry.bind('<Return>', self.process_punch)
-        # Admin shortcut is bound in main.py
+        
+        # Bind admin shortcut
+        root = self.winfo_toplevel()
+        root.bind(self.settings['ui']['adminShortcut'], self.show_admin_panel)
         
         # Initialize UI state after widget is fully created
         self.after(100, self.reset_ui)
         
-        # Start periodic check for entry field focus
-        self.after(1000, self.check_entry_focus)
-
+        # Bind window activation event
+        root.bind('<Map>', self.on_window_activate)
+        root.bind('<FocusIn>', self.on_window_activate)
     def show_admin_panel(self, event=None):
         """Show the admin panel"""
         from admin_panel import show_admin_login, AdminPanel
         
         def on_login(success: bool):
             if success:
+                # Set admin panel state
+                self.admin_panel_open = True
+                
                 # Create admin panel window
                 admin_panel = AdminPanel(self.winfo_toplevel())
                 
@@ -225,6 +234,13 @@ class TimeClockUI(customtkinter.CTkFrame):
                 admin_panel.geometry(f"+{x}+{y}")
                 admin_panel.lift()
                 admin_panel.focus_force()
+                
+                # Bind close event
+                def on_admin_close():
+                    self.admin_panel_open = False
+                    admin_panel.destroy()
+                
+                admin_panel.protocol("WM_DELETE_WINDOW", on_admin_close)
         
         show_admin_login(self.winfo_toplevel(), on_login)
 
@@ -237,11 +253,12 @@ class TimeClockUI(customtkinter.CTkFrame):
             raise
 
     def create_widgets(self):
+        """Create all UI widgets"""
         # Logo is 361 x 156 px with 15px padding
-        header_row = customtkinter.CTkFrame (
+        header_row = customtkinter.CTkFrame(
             self,
-            height = 187,
-            fg_color = "#212121"
+            height=187,
+            fg_color="#212121"
         )
         
         # Create panel for left column
@@ -368,7 +385,6 @@ class TimeClockUI(customtkinter.CTkFrame):
 
     def reset_ui(self):
         """Reset UI to initial state"""
-        self.employee_id.set("")
         self.set_status("Please scan your ID", "Por favor pase su tarjeta", StatusColors.NORMAL)
         # Schedule focus_set after widget is fully rendered
         self.after(100, lambda: self.id_entry.focus_set())
@@ -390,85 +406,115 @@ class TimeClockUI(customtkinter.CTkFrame):
 
     def process_punch(self, event=None):
         """Process an employee punch"""
+        import threading
+        
         employee_id = self.employee_id.get().strip()
         if not employee_id:
             return
+            
+        # Clear entry field immediately
+        self.employee_id.set("")
+        self.update()  # Force update to show cleared entry
         
-        try:
-            # Get current time once to use for both punch and photo
-            punch_time = datetime.now()
-            
-            # Capture photo first with the timestamp
-            photo_data = self.camera_service.capture_photo(employee_id, punch_time)
-            
-            # Record punch with same timestamp
-            response = self.soap_client.record_punch(
-                employee_id=employee_id,
-                punch_time=punch_time
-            )
-            
-            # If punch was successful, upload the photo with same timestamp
-            if response['success'] and photo_data:
-                self.soap_client._upload_image(employee_id, photo_data, punch_time)
-            
-            # Handle response
-            if response['offline']:
-                self.set_status(
-                    "Punch saved offline",
-                    "Datos guardados sin conexión",
-                    StatusColors.INACTIVE
-                )
-            elif response['success']:
-                if response['punchType'].lower() == 'checkin':
-                    self.set_status(
-                        f"Welcome {response['firstName']}!",
-                        f"¡Bienvenido {response['firstName']}!",
-                        StatusColors.SUCCESS
-                    )
-                else:
-                    self.set_status(
-                        f"Goodbye {response['firstName']}!",
-                        f"¡Adiós {response['firstName']}!",
-                        StatusColors.SUCCESS
-                    )
-            else:
-                self.set_status(
-                    "Punch failed - Please try again",
-                    "Error - Por favor intente de nuevo",
-                    StatusColors.ERROR
-                )
-            
-        except Exception as e:
-            logger.error(f"Error processing punch: {e}")
-            self.set_status(
-                "System Error - Please try again",
-                "Error del sistema - Por favor intente de nuevo",
-                StatusColors.ERROR
-            )
+        # Set temporary status
+        self.set_status(
+            "Processing...",
+            "Procesando...",
+            StatusColors.NORMAL
+        )
         
-        finally:
-            # Clean up
-            self.employee_id.set("")
-            
-            # Reset UI and ensure focus after delay
-            def reset_with_focus():
-                self.reset_ui()
-                self.after(100, lambda: self.id_entry.focus_set())
-            self.after(3000, reset_with_focus)
+        def process_in_thread():
+            try:
+                # Get current time once to use for both punch and photo
+                punch_time = datetime.now()
+                
+                # Capture photo first with the timestamp
+                photo_data = self.camera_service.capture_photo(employee_id, punch_time)
+                
+                # Record punch with same timestamp
+                response = self.soap_client.record_punch(
+                    employee_id=employee_id,
+                    punch_time=punch_time
+                )
+                
+                # If punch was successful, upload the photo with same timestamp
+                if response['success'] and photo_data:
+                    self.soap_client._upload_image(employee_id, photo_data, punch_time)
+                
+                # Update UI in main thread
+                def update_ui():
+                    if response['offline']:
+                        self.set_status(
+                            "Punch saved offline",
+                            "Datos guardados sin conexión",
+                            StatusColors.INACTIVE
+                        )
+                        # Reset UI after standard delay
+                        self.after(3000, self.reset_ui)
+                    elif response['success']:
+                        if response['punchType'].lower() == 'checkin':
+                            self.set_status(
+                                f"Welcome {response['firstName']}!",
+                                f"¡Bienvenido {response['firstName']}!",
+                                StatusColors.SUCCESS
+                            )
+                        else:
+                            self.set_status(
+                                f"Goodbye {response['firstName']}!",
+                                f"¡Adiós {response['firstName']}!",
+                                StatusColors.SUCCESS
+                            )
+                        # Reset UI after standard delay
+                        self.after(3000, self.reset_ui)
+                    else:
+                        # Check if there's a specific exception
+                        if 'exception' in response and response['exception']:
+                            exception_msg = PunchExceptions.get_message(response['exception'])
+                            if exception_msg:
+                                eng_msg, esp_msg, status_color = exception_msg
+                                self.set_status(
+                                    eng_msg,
+                                    esp_msg,
+                                    getattr(StatusColors, status_color)
+                                )
+                                # Reset UI after longer delay for exceptions (6 seconds)
+                                self.after(6000, self.reset_ui)
+                                return
+                        
+                        # Default error message if no specific exception is found
+                        self.set_status(
+                            "Punch failed - Please try again",
+                            "Error - Por favor intente de nuevo",
+                            StatusColors.ERROR
+                        )
+                        # Reset UI after standard delay
+                        self.after(3000, self.reset_ui)
+                
+                # Schedule UI update in main thread
+                self.after(0, update_ui)
+                
+            except Exception as e:
+                logger.error(f"Error processing punch: {e}")
+                def show_error():
+                    self.set_status(
+                        "System Error - Please try again",
+                        "Error del sistema - Por favor intente de nuevo",
+                        StatusColors.ERROR
+                    )
+                    # Reset UI after delay
+                    self.after(3000, self.reset_ui)
+                self.after(0, show_error)
+        
+        # Start processing in separate thread
+        thread = threading.Thread(target=process_in_thread)
+        thread.daemon = True  # Thread will be terminated when main program exits
+        thread.start()
     
-    def check_entry_focus(self):
-        """Periodically check if the entry field has focus and set it if it doesn't"""
-        try:
-            # Only check if the application is visible (has a mapping)
-            if self.winfo_ismapped() and self.winfo_toplevel().focus_get() != self.id_entry:
-                # Set focus to entry field, but don't try to force the window to the foreground
-                logger.debug("Entry field lost focus, resetting focus")
-                self.id_entry.focus_set()
-        except Exception as e:
-            logger.error(f"Error in check_entry_focus: {e}")
-        finally:
-            # Reschedule check every 2 seconds
-            self.after(2000, self.check_entry_focus)
+    def on_window_activate(self, event=None):
+        """Handle window activation"""
+        # Only set focus if no dialog/admin panel is active
+        if not isinstance(self.winfo_toplevel().focus_get(), customtkinter.CTkToplevel):
+            self.id_entry.focus_set()
 
 if __name__ == "__main__":
     # Test UI

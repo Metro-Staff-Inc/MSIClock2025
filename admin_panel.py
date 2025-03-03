@@ -15,11 +15,17 @@ def show_admin_login(parent, callback: Callable[[bool], None]):
         # Load settings
         with open('settings.json', 'r') as f:
             settings = json.load(f)
+        
+        # Exit fullscreen if needed
+        was_fullscreen = False
+        if hasattr(parent, '_fullscreen') and parent._fullscreen:
+            was_fullscreen = True
+            parent.attributes('-fullscreen', False)
+            parent.update()  # Ensure window state is updated
             
         # Create dialog window
         dialog = customtkinter.CTkToplevel(parent)
         dialog.title("Admin Login")
-        dialog.attributes('-topmost', True)
         
         # Scale dialog size
         width = 300
@@ -68,12 +74,14 @@ def show_admin_login(parent, callback: Callable[[bool], None]):
             entered_password = password_var.get().strip()
             if verify_password(entered_password, settings['ui']['adminPassword']):
                 dialog.destroy()
+                # Restore fullscreen if it was previously enabled
+                if was_fullscreen:
+                    parent.after(100, lambda: parent.attributes('-fullscreen', True))
                 callback(True)
             else:
                 # Show error message
                 error_dialog = customtkinter.CTkToplevel(parent)
                 error_dialog.title("Error")
-                error_dialog.attributes('-topmost', True)
                 error_dialog.transient(parent)
                 
                 # Set size and position
@@ -216,30 +224,54 @@ class AdminPanel(customtkinter.CTkToplevel):
 
     def show_error(self, message: str):
         """Show error dialog"""
-        dialog = customtkinter.CTkToplevel(self)
-        dialog.title("Error")
-        
-        # Scale dialog dimensions
-        width = 300
-        height = 100
-        dialog.geometry(f"{width}x{height}")
-        dialog.transient(self)
-        dialog.grab_set()
-        
-        customtkinter.CTkLabel(
-            dialog,
-            text=message,
-            wraplength=250,
-            font=self.scaled_fonts['text']
-        ).pack(pady=10)
-        
-        customtkinter.CTkButton(
-            dialog,
-            text="OK",
-            command=dialog.destroy,
-            font=self.scaled_fonts['button'],
-            height=30
-        ).pack()
+        try:
+            # Exit fullscreen if needed
+            if hasattr(self.master, '_fullscreen') and self.master._fullscreen:
+                self.master.attributes('-fullscreen', False)
+                self.master.update()  # Ensure window state is updated
+                
+            dialog = customtkinter.CTkToplevel(self)
+            dialog.title("Error")
+            
+            # Scale dialog dimensions
+            width = 300
+            height = 100
+            dialog.geometry(f"{width}x{height}")
+            dialog.transient(self)
+            
+            # Create content before attempting to grab focus
+            customtkinter.CTkLabel(
+                dialog,
+                text=message,
+                wraplength=250,
+                font=self.scaled_fonts['text']
+            ).pack(pady=10)
+            
+            customtkinter.CTkButton(
+                dialog,
+                text="OK",
+                command=dialog.destroy,
+                font=self.scaled_fonts['button'],
+                height=30
+            ).pack()
+            
+            # Ensure dialog is ready before grabbing focus
+            dialog.update_idletasks()
+            
+            # Try to grab focus safely
+            try:
+                dialog.grab_set()
+            except Exception as e:
+                logger.warning(f"Could not grab focus for error dialog: {e}")
+                
+            # Ensure dialog stays on top
+            dialog.lift()
+            dialog.focus_force()
+            
+        except Exception as e:
+            logger.error(f"Failed to show error dialog: {e}")
+            # Fall back to console error
+            print(f"ERROR: {message}")
 
     def create_widgets(self):
         # Create main container frame
@@ -627,11 +659,15 @@ class AdminPanel(customtkinter.CTkToplevel):
                 os.fsync(f.fileno())
                 logger.debug("Settings saved and synced to disk")
             
+            # Exit fullscreen if needed
+            if hasattr(self.master, '_fullscreen') and self.master._fullscreen:
+                self.master.attributes('-fullscreen', False)
+                self.master.update()  # Ensure window state is updated
+                
             # Create success dialog
             dialog = customtkinter.CTkToplevel(self)
             dialog.title("Success")
             dialog.transient(self)
-            dialog.grab_set()
             
             # Set size and position
             width = 300
@@ -659,6 +695,15 @@ class AdminPanel(customtkinter.CTkToplevel):
                 height=35
             ).pack(pady=10)
             
+            # Ensure dialog is ready before grabbing focus
+            dialog.update_idletasks()
+            
+            # Try to grab focus safely
+            try:
+                dialog.grab_set()
+            except Exception as e:
+                logger.warning(f"Could not grab focus for success dialog: {e}")
+                
             # Ensure dialog stays on top
             dialog.lift()
             dialog.focus_force()
@@ -669,21 +714,51 @@ class AdminPanel(customtkinter.CTkToplevel):
 
     def test_camera(self):
         try:
+            # Exit fullscreen if needed
+            if hasattr(self.master, '_fullscreen') and self.master._fullscreen:
+                self.master.attributes('-fullscreen', False)
+                self.master.update()  # Ensure window state is updated
+                
             camera_service = CameraService(self.settings_path)
             results = camera_service.test_camera()
             
             dialog = customtkinter.CTkToplevel(self)
             dialog.title("Camera Test")
-            dialog.geometry("300x200")
+            dialog.geometry("400x300")  # Larger dialog for more information
             dialog.transient(self)
-            dialog.grab_set()
             
+            # Create content
             message = "Camera Test Results:\n\n"
             for key, value in results.items():
                 message += f"{key}: {value}\n"
             
-            customtkinter.CTkLabel(dialog, text=message, wraplength=250).pack(pady=10)
-            customtkinter.CTkButton(dialog, text="OK", command=dialog.destroy).pack()
+            customtkinter.CTkLabel(
+                dialog,
+                text=message,
+                wraplength=350,
+                font=self.scaled_fonts['text']
+            ).pack(pady=10)
+            
+            customtkinter.CTkButton(
+                dialog,
+                text="OK",
+                command=dialog.destroy,
+                font=self.scaled_fonts['button'],
+                height=35
+            ).pack(pady=10)
+            
+            # Ensure dialog is ready before grabbing focus
+            dialog.update_idletasks()
+            
+            # Try to grab focus safely
+            try:
+                dialog.grab_set()
+            except Exception as e:
+                logger.warning(f"Could not grab focus for camera test dialog: {e}")
+                
+            # Ensure dialog stays on top
+            dialog.lift()
+            dialog.focus_force()
             
         except Exception as e:
             logger.error(f"Camera test failed: {e}")
@@ -713,11 +788,15 @@ class AdminPanel(customtkinter.CTkToplevel):
             self.log_text.delete("1.0", "end")
             self.log_text.insert("1.0", "Logs cleared")
             
+            # Exit fullscreen if needed
+            if hasattr(self.master, '_fullscreen') and self.master._fullscreen:
+                self.master.attributes('-fullscreen', False)
+                self.master.update()  # Ensure window state is updated
+                
             # Create success dialog
             dialog = customtkinter.CTkToplevel(self)
             dialog.title("Success")
             dialog.transient(self)
-            dialog.grab_set()
             
             # Set size and position
             width = 300
@@ -745,6 +824,15 @@ class AdminPanel(customtkinter.CTkToplevel):
                 height=35
             ).pack(pady=10)
             
+            # Ensure dialog is ready before grabbing focus
+            dialog.update_idletasks()
+            
+            # Try to grab focus safely
+            try:
+                dialog.grab_set()
+            except Exception as e:
+                logger.warning(f"Could not grab focus for success dialog: {e}")
+                
             # Ensure dialog stays on top
             dialog.lift()
             dialog.focus_force()
@@ -781,10 +869,18 @@ class AdminPanel(customtkinter.CTkToplevel):
             self.destroy()
 
     def close_program(self):
+        # Exit fullscreen if needed
+        if hasattr(self.master, '_fullscreen') and self.master._fullscreen:
+            self.master.attributes('-fullscreen', False)
+            self.master.update()  # Ensure window state is updated
+        
         # Create confirm dialog
         dialog = customtkinter.CTkToplevel(self)
         dialog.title("Confirm Close")
         dialog.transient(self)
+        
+        # Update to ensure window is ready
+        dialog.update_idletasks()
         dialog.grab_set()
         
         # Set size and position

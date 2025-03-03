@@ -92,7 +92,7 @@ class SoapClient:
                 
             # Log punch attempt
             filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
-            logger.info(f"PUNCH SEND: {employee_id}, {punch_time.isoformat()}, {filename}")
+            logger.debug(f"PUNCH SEND: {employee_id}, {punch_time.isoformat()}, {filename}")
 
             # Try online punch first
             try:
@@ -249,6 +249,14 @@ class SoapClient:
 
     def _format_response(self, soap_response: Any, online: bool = True, employee_id: Optional[str] = None) -> Dict[str, Any]:
         """Format the SOAP response into a standardized dictionary"""
+        # Log the raw SOAP response at DEBUG level
+        if online and soap_response:
+            logger.debug(f"RAW SOAP RESPONSE: employee_id={employee_id}, response_type={type(soap_response).__name__}")
+            # Log all attributes of RecordSwipeReturnInfo if it exists
+            if hasattr(soap_response, 'RecordSwipeReturnInfo'):
+                attrs = vars(soap_response.RecordSwipeReturnInfo)
+                logger.debug(f"SOAP RESPONSE ATTRIBUTES: {', '.join(f'{k}={v}' for k, v in attrs.items())}")
+        
         if not online:
             return {
                 'success': True,
@@ -259,6 +267,8 @@ class SoapClient:
         # Check for system error codes
         if hasattr(soap_response.RecordSwipeReturnInfo, 'SystemErrorCode'):
             error_code = soap_response.RecordSwipeReturnInfo.SystemErrorCode
+            # Log raw error code at DEBUG level for debugging
+            logger.debug(f"SOAP RAW ERROR CODE: {error_code}, type: {type(error_code).__name__}, employee_id: {employee_id}")
             error_messages = {
                 '-1': 'Connection not secure',
                 '-2': 'Input parameters not found',
@@ -276,6 +286,11 @@ class SoapClient:
                     'error_code': error_code
                 }
 
+        # Log punch exceptions at INFO level
+        if hasattr(soap_response.RecordSwipeReturnInfo, 'PunchException') and soap_response.RecordSwipeReturnInfo.PunchException:
+            # Log at INFO level so it's visible in normal operation
+            logger.info(f"PUNCH EXCEPTION: {employee_id}, exception={soap_response.RecordSwipeReturnInfo.PunchException}")
+            
         response = {
             'success': soap_response.RecordSwipeReturnInfo.PunchSuccess,
             'offline': False,
@@ -287,7 +302,7 @@ class SoapClient:
         }
         
         # Log punch response
-        logger.info(
+        logger.debug(
             f"PUNCH RESPONSE: {employee_id}, "
             f"{response['lastName']}, {response['firstName']}, "
             f"{response['success']}, {response['punchType']}, "

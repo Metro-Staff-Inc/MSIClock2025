@@ -207,7 +207,7 @@ class TimeClock:
                 }
             },
             "ui": {
-                "fullscreen": True,
+                "fullscreen": False,
                 "language": "en",
                 "adminShortcut": "ctrl+alt+a",
                 "adminPassword": hash_password("Metro2024!"),
@@ -354,75 +354,50 @@ class TimeClock:
         except Exception as e:
             logging.warning(f"Could not set application icon: {e}")
         
-        # Only set size constraints in windowed mode
-        if not self.settings['ui'].get('fullscreen', True):
-            self.root.minsize(window_width, window_height)
-            self.root.maxsize(window_width, window_height)
-            self.root.resizable(False, False)
+        # Set window size and position
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
-        if self.settings['ui'].get('fullscreen', True):
-            # Set initial position and size
-            self.root.geometry(f"{screen_width}x{screen_height}+0+0")
-            
-            # Remove window decorations and set topmost
-            self.root.overrideredirect(True)
-            self.root.attributes('-topmost', True)
-            
-            # Create and configure content frame
-            content_frame = customtkinter.CTkFrame(self.root, width=window_width, height=window_height)
-            content_frame.pack_propagate(False)  # Prevent frame from shrinking
-            
-            # Force position to top-left
-            content_frame.place(x=0, y=0)
-            
-            # Store frame for later use
-            self.content_frame = content_frame
-            
-            # Update to ensure geometry is applied
-            self.root.update_idletasks()
-            
-            # Ensure window is properly focused
-            self.root.focus_force()
-            logging.debug("Initial focus state: focused (fullscreen)")
-            
-            # Bind configuration event to maintain position
-            def maintain_position(event=None):
-                self.root.geometry(f"{screen_width}x{screen_height}+0+0")
-                content_frame.place(x=0, y=0)
-            
-            self.root.bind("<Configure>", maintain_position)
-        else:
-            # For windowed mode
-            self.root.geometry(f"{window_width}x{window_height}+0+0")
-            
-            # Create and configure content frame
-            content_frame = customtkinter.CTkFrame(self.root, width=window_width, height=window_height)
-            content_frame.pack_propagate(False)
-            content_frame.pack(fill="both", expand=True)
-            
-            # Store frame for later use
-            self.content_frame = content_frame
-            
-            # Update to ensure geometry is applied
-            self.root.update_idletasks()
-            
-            # Bind configuration event to maintain position
-            def maintain_position(event=None):
-                self.root.geometry(f"{window_width}x{window_height}+0+0")
-            
-            self.root.bind("<Configure>", maintain_position)
-            
-            logging.debug("Initial focus state: focused (windowed)")
-            
-        # Ensure window is ready and visible
+        # Set window properties
+        self.root.minsize(window_width, window_height)
+        self.root.resizable(True, True)
+        
+        # Create toolbar frame
+        self.toolbar = customtkinter.CTkFrame(self.root, height=30)
+        self.toolbar.pack(fill="x", side="top")
+        
+        # Add fullscreen toggle button
+        self.fullscreen_btn = customtkinter.CTkButton(
+            self.toolbar,
+            text="⛶",  # Unicode symbol for fullscreen
+            width=30,
+            height=25,
+            command=self.toggle_fullscreen
+        )
+        self.fullscreen_btn.pack(side="right", padx=5, pady=2)
+        
+        # Initialize fullscreen state from settings
+        self._fullscreen = self.settings.get('ui', {}).get('fullscreen', False)
+        if self._fullscreen:
+            self.root.attributes('-fullscreen', True)
+            self.toolbar.pack_forget()
+            self.fullscreen_btn.configure(text="❐")
+        
+        # Create main content frame
+        self.content_frame = customtkinter.CTkFrame(self.root)
+        self.content_frame.pack(fill="both", expand=True)
+        
+        # Update to ensure geometry is applied
         self.root.update_idletasks()
         self.root.lift()
-            
+        
         # Prevent alt+f4
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # Bind admin shortcut to root window
-        self.root.bind(self.settings['ui']['adminShortcut'], self.show_admin_dialog)
+        self.root.bind('<Control-Alt-a>', self.show_admin_panel)  # Explicit binding
+        self.root.bind(self.settings['ui']['adminShortcut'], self.show_admin_panel)  # Settings-based binding
         
         # Focus monitoring removed
 
@@ -553,7 +528,7 @@ class TimeClock:
             
             admin_panel.protocol("WM_DELETE_WINDOW", on_admin_close)
 
-    def show_admin_dialog(self, event=None, first_launch=False):
+    def show_admin_panel(self, event=None, first_launch=False):
         """Show admin login dialog"""
         if first_launch:
             # Skip password prompt on first launch
@@ -573,6 +548,36 @@ class TimeClock:
     # Dialog detection method removed
     
     # Focus recapture method removed
+
+    def toggle_fullscreen(self):
+        """Toggle fullscreen state and toolbar visibility"""
+        self._fullscreen = not self._fullscreen
+        
+        if self._fullscreen:
+            # Save current geometry before going fullscreen
+            self._last_geometry = self.root.geometry()
+            # Hide toolbar
+            self.toolbar.pack_forget()
+            # Set fullscreen
+            self.root.attributes('-fullscreen', True)
+            self.fullscreen_btn.configure(text="❐")  # Unicode symbol for exit fullscreen
+        else:
+            # Exit fullscreen
+            self.root.attributes('-fullscreen', False)
+            # Show toolbar
+            self.toolbar.pack(fill="x", side="top")
+            # Restore previous geometry
+            if hasattr(self, '_last_geometry'):
+                self.root.geometry(self._last_geometry)
+            self.fullscreen_btn.configure(text="⛶")  # Unicode symbol for enter fullscreen
+        
+        # Update settings
+        self.settings['ui']['fullscreen'] = self._fullscreen
+        try:
+            with open('settings.json', 'w') as f:
+                json.dump(self.settings, f, indent=2)
+        except Exception as e:
+            logging.error(f"Failed to save fullscreen setting: {e}")
 
     def on_closing(self):
         """Handle window close attempt"""

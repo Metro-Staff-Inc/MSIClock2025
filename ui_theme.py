@@ -38,6 +38,7 @@ class StatusColors:
     SUCCESS = "#34C759"
     NORMAL = "#FFFFFF"
     INACTIVE = "gray60"
+    WARNING = "#F39C12"  # Orange/Amber - Add this line
     
     @staticmethod
     def get_color(status_type: str) -> str:
@@ -46,6 +47,7 @@ class StatusColors:
             "error": StatusColors.ERROR,
             "success": StatusColors.SUCCESS,
             "normal": StatusColors.NORMAL,
-            "inactive": StatusColors.INACTIVE
+            "inactive": StatusColors.INACTIVE,
+            "warning": StatusColors.WARNING  # Add this line
         }
         return colors.get(status_type.lower(), StatusColors.NORMAL)
