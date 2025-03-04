@@ -1,7 +1,7 @@
 #!/bin/bash
 
-### MSI Time Clock Automated Installation Script ###
-# Run this script as root after a fresh Ubuntu 24.04 LTS installation.
+### MSI Time Clock Installation Script for Ubuntu Desktop ###
+# Run this script as root after a fresh Ubuntu 24.04 Desktop installation.
 
 set -e  # Exit immediately if a command fails
 
@@ -14,10 +14,14 @@ rm -rf /var/lib/msi-clock
 rm -rf /etc/systemd/system/msi-clock.service
 rm -rf /etc/systemd/system/rustdesk.service
 rm -rf /etc/udev/rules.d/99-webcam.rules
-rm -rf /home/msi-time-clock/.xinitrc
-rm -rf /home/msi-time-clock/.bash_profile
-rm -rf /home/msi-time-clock/.config/openbox
 systemctl daemon-reload
+
+# --- Remove Unnecessary Ubuntu Desktop Applications ---
+echo "Removing unnecessary Ubuntu Desktop applications..."
+apt remove -y libreoffice-* thunderbird gnome-games gnome-calendar rhythmbox cheese aisleriot shotwell transmission-gtk simple-scan firefox
+apt autoremove -y
+apt purge -y snapd
+rm -rf ~/snap
 
 # --- User Account Setup ---
 USERNAME="msi-time-clock"
@@ -30,58 +34,10 @@ echo "$USERNAME:$PASSWORD" | chpasswd
 usermod -aG sudo "$USERNAME"
 usermod -aG video,input,tty "$USERNAME"  # Ensure webcam and input access
 
-# --- Fix Xorg Permissions ---
-echo "Configuring Xorg permissions..."
-cat <<EOF > /etc/X11/Xwrapper.config
-allowed_users=anybody
-needs_root_rights=yes
-EOF
-
 # --- System Update and Package Installation ---
 echo "Updating system and installing required packages..."
 apt update && apt upgrade -y
-apt install -y xserver-xorg x11-xserver-utils xinit openbox obconf python3 python3-pip python3-venv python3-tk sqlite3 curl wget git network-manager v4l-utils
-
-# --- Configure Auto-Login ---
-echo "Setting up auto-login..."
-mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat <<EOF > /etc/systemd/system/getty@tty1.service.d/autologin.conf
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin $USERNAME --noclear %I \$TERM
-EOF
-
-# --- Configure Xorg and Openbox to Start UI Automatically ---
-cat <<EOF > "/home/$USERNAME/.xinitrc"
-#!/bin/sh
-export DISPLAY=:0
-xhost +SI:localuser:$USERNAME
-exec openbox &
-exec /opt/msi-clock/venv/bin/python /opt/msi-clock/main.py
-EOF
-chown $USERNAME:$USERNAME "/home/$USERNAME/.xinitrc"
-chmod +x "/home/$USERNAME/.xinitrc"
-
-# --- Configure Bash Profile to Start Xorg on Login ---
-echo "export DISPLAY=:0" >> "/home/$USERNAME/.bash_profile"
-echo "xhost +SI:localuser:$USERNAME" >> "/home/$USERNAME/.bash_profile"
-echo "if [[ -z \$DISPLAY ]] && [[ \$(tty) == /dev/tty1 ]]; then startx; fi" >> "/home/$USERNAME/.bash_profile"
-chown $USERNAME:$USERNAME "/home/$USERNAME/.bash_profile"
-
-# --- Configure Network (Prompt for Wi-Fi Setup) ---
-echo "Checking network connection..."
-if ! ping -c 1 google.com &> /dev/null; then
-    echo "No internet detected. Would you like to set up Wi-Fi now? (y/n)"
-    read -r WIFI_SETUP
-    if [ "$WIFI_SETUP" == "y" ]; then
-        nmcli dev wifi list
-        echo "Enter Wi-Fi SSID: "
-        read -r WIFI_SSID
-        echo "Enter Wi-Fi Password (leave blank for none): "
-        read -rs WIFI_PASS
-        nmcli dev wifi connect "$WIFI_SSID" password "$WIFI_PASS"
-    fi
-fi
+apt install -y python3 python3-pip python3-venv python3-tk sqlite3 curl wget git network-manager v4l-utils
 
 # --- Clone and Install MSI Time Clock Application ---
 echo "Cloning MSI Clock application..."
@@ -100,6 +56,20 @@ mkdir -p /var/lib/msi-clock
 cp /opt/msi-clock/database_template.db /var/lib/msi-clock/data.db
 chown -R $USERNAME:$USERNAME /var/lib/msi-clock
 
+# --- Configure MSI Clock to Auto-Start ---
+echo "Configuring MSI Clock to start on login..."
+sudo -u $USERNAME mkdir -p /home/$USERNAME/.config/autostart
+cat <<EOF > /home/$USERNAME/.config/autostart/msi-clock.desktop
+[Desktop Entry]
+Type=Application
+Exec=/opt/msi-clock/venv/bin/python /opt/msi-clock/main.py
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=MSI Clock
+EOF
+chown $USERNAME:$USERNAME /home/$USERNAME/.config/autostart/msi-clock.desktop
+
 # --- Install RustDesk ---
 echo "Installing RustDesk..."
 LATEST_VERSION=$(curl -s https://api.github.com/repos/rustdesk/rustdesk/releases/latest | grep "tag_name" | cut -d '"' -f 4)
@@ -110,28 +80,17 @@ apt install -y ./rustdesk.deb || apt --fix-broken install -y
 rm rustdesk.deb
 
 # --- Configure RustDesk for Unattended Access ---
-sudo -u $USERNAME mkdir -p "/home/$USERNAME/.config/openbox"
-echo "rustdesk &" >> "/home/$USERNAME/.config/openbox/autostart"
-
-cat <<EOF > /etc/systemd/system/rustdesk.service
-[Unit]
-Description=RustDesk Remote Desktop
-After=network.target graphical.target
-
-[Service]
-ExecStart=/bin/bash -c 'sleep 10; export DISPLAY=:0; /usr/bin/rustdesk'
-Restart=always
-User=$USERNAME
-Environment=DISPLAY=:0
-WorkingDirectory=/home/$USERNAME
-
-[Install]
-WantedBy=graphical.target
+sudo -u $USERNAME mkdir -p /home/$USERNAME/.config/autostart
+cat <<EOF > /home/$USERNAME/.config/autostart/rustdesk.desktop
+[Desktop Entry]
+Type=Application
+Exec=rustdesk
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=RustDesk
 EOF
-
-systemctl daemon-reload
-systemctl enable rustdesk
-systemctl start rustdesk
+chown $USERNAME:$USERNAME /home/$USERNAME/.config/autostart/rustdesk.desktop
 
 # --- Configure Webcam Access (Udev Rules) ---
 echo "Configuring webcam access..."
@@ -161,7 +120,6 @@ Restart=always
 RestartSec=5
 StandardOutput=append:/var/log/msi-clock.log
 StandardError=append:/var/log/msi-clock.log
-Environment=DISPLAY=:0
 
 [Install]
 WantedBy=graphical.target
