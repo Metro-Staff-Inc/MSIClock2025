@@ -24,7 +24,7 @@ apt purge -y snapd
 rm -rf ~/snap
 
 # --- User Account Setup ---
-USERNAME="msi-time-clock"
+USERNAME="msi-clock"
 PASSWORD="Metro2024!"
 
 # Ensure the user exists (skip creation if already exists)
@@ -102,7 +102,9 @@ udevadm control --reload-rules && udevadm trigger
 # --- Disable Automatic Updates and MOTD ---
 echo "Disabling automatic updates..."
 apt remove -y unattended-upgrades
-sed -i 's/\(\s*\)\(.*motd.*\)/#\1\2/' /etc/pam.d/sshd
+if [ -f /etc/pam.d/sshd ]; then
+    sed -i 's/\\(\\s*\\)\\(.*motd.*\\)/#\\1\\2/' /etc/pam.d/sshd
+fi
 rm -f /etc/update-motd.d/*
 
 # --- Configure Systemd Service for MSI Clock ---
