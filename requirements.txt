@@ -9,6 +9,7 @@ bcrypt>=4.0.1       # Password hashing
 pywin32>=306; platform_system == "Windows"  # Windows-specific features
 ultralytics>=8.0.0  # YOLOv8 for person detection
 customtkinter>=5.2.2  # Modern UI framework
+tkinter>=8.6.12    # Tkinter for UI
 
 # Build dependencies
 pyinstaller>=6.3.0  # Creating executable
