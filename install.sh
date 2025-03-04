@@ -1,162 +1,140 @@
 #!/bin/bash
 
-echo "MSI Time Clock Installation Script"
-echo "================================="
+### MSI Time Clock Automated Installation Script ###
+# Run this script as root after a fresh Ubuntu 24.04 LTS installation.
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then 
-    echo "Please run as root (sudo)"
-    exit 1
+set -e  # Exit immediately if a command fails
+
+# --- User Account Setup ---
+USERNAME="msi-time-clock"
+PASSWORD="Metro2024!"
+
+echo "Creating user: $USERNAME"
+useradd -m -s /bin/bash "$USERNAME"
+echo "$USERNAME:$PASSWORD" | chpasswd
+usermod -aG sudo "$USERNAME"
+usermod -aG video "$USERNAME"  # Ensure webcam access
+
+# --- System Update and Package Installation ---
+echo "Updating system and installing required packages..."
+apt update && apt upgrade -y
+apt install -y xserver-xorg x11-xserver-utils xinit openbox obconf python3 python3-pip sqlite3 curl wget git network-manager v4l-utils
+
+# --- Configure Auto-Login ---
+echo "Setting up auto-login..."
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat <<EOF > /etc/systemd/system/getty@tty1.service.d/autologin.conf
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin $USERNAME --noclear %I \$TERM
+EOF
+
+# --- Configure Xorg and Openbox to Start UI Automatically ---
+cat <<EOF > "/home/$USERNAME/.xinitrc"
+#!/bin/sh
+exec openbox &
+exec python3 /opt/msi-clock/main.py
+EOF
+chown $USERNAME:$USERNAME "/home/$USERNAME/.xinitrc"
+chmod +x "/home/$USERNAME/.xinitrc"
+
+# --- Configure Bash Profile to Start Xorg on Login ---
+echo "if [[ -z \$DISPLAY ]] && [[ \$(tty) == /dev/tty1 ]]; then startx; fi" >> "/home/$USERNAME/.bash_profile"
+chown $USERNAME:$USERNAME "/home/$USERNAME/.bash_profile"
+
+# --- Configure Network (Prompt for Wi-Fi Setup) ---
+echo "Checking network connection..."
+if ! ping -c 1 google.com &> /dev/null; then
+    echo "No internet detected. Would you like to set up Wi-Fi now? (y/n)"
+    read -r WIFI_SETUP
+    if [ "$WIFI_SETUP" == "y" ]; then
+        nmcli dev wifi list
+        echo "Enter Wi-Fi SSID: "
+        read -r WIFI_SSID
+        echo "Enter Wi-Fi Password (leave blank for none): "
+        read -rs WIFI_PASS
+        nmcli dev wifi connect "$WIFI_SSID" password "$WIFI_PASS"
+    fi
 fi
 
-# Get username for service file
-read -p "Enter username for service file: " USERNAME
+# --- Clone and Install MSI Time Clock Application ---
+echo "Cloning MSI Clock application..."
+git clone https://github.com/Metro-Staff-Inc/MSIClock2025 /opt/msi-clock
+chown -R $USERNAME:$USERNAME /opt/msi-clock
+pip3 install -r /opt/msi-clock/requirements.txt
 
-echo "Installing system dependencies..."
-apt-get update
-apt-get install -y \
-    python3-tk \
-    python3-pip \
-    python3-opencv \
-    python3-dev \
-    python3-setuptools \
-    build-essential \
-    cmake \
-    pkg-config \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
-    libgl1-mesa-glx \
-    v4l-utils \
-    libxcb-xinerama0 \
-    libxcb-cursor0 \
-    libxcb-randr0 \
-    libxcb-xfixes0 \
-    libxcb-shape0 \
-    libxcb-xkb1 \
-    libxkbcommon-x11-0 \
-    v41-utils
+# --- Configure SQLite Database ---
+mkdir -p /var/lib/msi-clock
+cp /opt/msi-clock/database_template.db /var/lib/msi-clock/data.db
+chown -R $USERNAME:$USERNAME /var/lib/msi-clock
 
-# Install CUDA only if needed and available
-if lspci | grep -i nvidia > /dev/null; then
-    echo "NVIDIA GPU detected, installing CUDA toolkit..."
-    apt-get install -y nvidia-cuda-toolkit
-else
-    echo "No NVIDIA GPU detected, skipping CUDA toolkit..."
-fi
+# --- Install RustDesk ---
+echo "Installing RustDesk..."
+wget https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-1.2.3-x86_64.deb
+apt install -y ./rustdesk-1.2.3-x86_64.deb
+rm rustdesk-1.2.3-x86_64.deb
 
-# Check if system Python is externally managed and install correctly
-if python3 -m pip --version 2>/dev/null | grep -q "externally managed"; then
-    echo "System Python is externally managed, using --break-system-packages"
-    pip3 install --break-system-packages -r requirements.txt
-else
-    echo "Installing normally..."
-    pip3 install -r requirements.txt
-fi
+# --- Configure RustDesk for Unattended Access ---
+sudo -u $USERNAME mkdir -p "/home/$USERNAME/.config/openbox"
+echo "rustdesk &" >> "/home/$USERNAME/.config/openbox/autostart"
 
-
-echo "Creating required directories..."
-mkdir -p logs
-mkdir -p photos
-mkdir -p data
-
-echo "Setting up fonts..."
-# Download fonts if needed
-echo "Checking and downloading fonts..."
-python3 download_fonts.py
-
-# Create user fonts directory if it doesn't exist
-mkdir -p /home/$USERNAME/.fonts
-mkdir -p /home/$USERNAME/.local/share/fonts
-
-# Copy required fonts to both locations for compatibility
-cp assets/fonts/Roboto-Regular.ttf /home/$USERNAME/.fonts/
-cp assets/fonts/IBMPlexSans-Medium.ttf /home/$USERNAME/.fonts/
-cp assets/fonts/IBMPlexSansCondensed-Bold.ttf /home/$USERNAME/.fonts/
-
-cp assets/fonts/Roboto-Regular.ttf /home/$USERNAME/.local/share/fonts/
-cp assets/fonts/IBMPlexSans-Medium.ttf /home/$USERNAME/.local/share/fonts/
-cp assets/fonts/IBMPlexSansCondensed-Bold.ttf /home/$USERNAME/.local/share/fonts/
-
-# Set correct ownership and permissions
-chown -R $USERNAME:$USERNAME /home/$USERNAME/.fonts
-chown -R $USERNAME:$USERNAME /home/$USERNAME/.local/share/fonts
-chmod -R 644 /home/$USERNAME/.fonts/*.ttf
-chmod -R 644 /home/$USERNAME/.local/share/fonts/*.ttf
-chmod 755 /home/$USERNAME/.fonts
-chmod 755 /home/$USERNAME/.local/share/fonts
-
-# Update font cache
-fc-cache -f -v
-
-# Verify fonts were installed
-echo "Verifying font installation..."
-if fc-list | grep -i "IBM Plex" > /dev/null; then
-    echo "Fonts installed successfully"
-else
-    echo "Warning: Some fonts may not have installed correctly"
-fi
-
-echo "Setting permissions..."
-chown -R $USERNAME:$USERNAME .
-chmod 755 main.py
-
-echo "Creating desktop entry..."
-cat > /usr/share/applications/MSITimeClock.desktop << EOL
-[Desktop Entry]
-Type=Application
-Name=MSI Time Clock
-Comment=Metro Staff Inc Time Clock Application
-Exec=/usr/bin/python3 $(pwd)/main.py
-Icon=$(pwd)/assets/people-dark-bg.png
-Terminal=false
-Categories=Utility;Office;
-EOL
-
-echo "Creating systemd service..."
-cat > /etc/systemd/system/timeclock.service << EOL
+cat <<EOF > /etc/systemd/system/rustdesk.service
 [Unit]
-Description=MSI Time Clock
-After=network.target
+Description=RustDesk Remote Desktop
+After=network.target graphical.target
 
 [Service]
-ExecStart=/usr/bin/python3 $(pwd)/main.py
-WorkingDirectory=$(pwd)
+ExecStart=/usr/bin/rustdesk
+Restart=always
 User=$USERNAME
 Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/$USERNAME/.Xauthority
+WorkingDirectory=/home/$USERNAME
 
 [Install]
 WantedBy=graphical.target
-EOL
+EOF
 
-echo "Enabling service..."
-systemctl enable timeclock
+systemctl daemon-reload
+systemctl enable rustdesk
+systemctl start rustdesk
 
-echo "Setting up camera access..."
-# Add user to required groups
-usermod -a -G video,input,dialout $USERNAME
+# --- Configure Webcam Access (Udev Rules) ---
+echo "Configuring webcam access..."
+cat <<EOF > /etc/udev/rules.d/99-webcam.rules
+SUBSYSTEM=="video4linux", GROUP="video", MODE="0666"
+EOF
+udevadm control --reload-rules && udevadm trigger
 
-# Create udev rules for camera access
-echo "Creating udev rules for camera access..."
-cat > /etc/udev/rules.d/99-camera.rules << EOL
-KERNEL=="video[0-9]*", SUBSYSTEM=="video4linux", GROUP="video", MODE="0666"
-KERNEL=="vchiq",  GROUP="video", MODE="0666"
-EOL
+# --- Disable Automatic Updates and MOTD ---
+echo "Disabling automatic updates..."
+apt remove -y unattended-upgrades
+sed -i 's/\(\s*\)\(.*motd.*\)/#\1\2/' /etc/pam.d/sshd
+rm -f /etc/update-motd.d/*
 
-# Reload udev rules
-udevadm control --reload-rules
-udevadm trigger
+# --- Configure Systemd Service for MSI Clock ---
+cat <<EOF > /etc/systemd/system/msi-clock.service
+[Unit]
+Description=MSI Time Clock Application
+After=network.target graphical.target
 
-# Set permissions on existing devices
-echo "Setting permissions on camera devices..."
-chmod 0666 /dev/video* 2>/dev/null || true
+[Service]
+Type=simple
+User=$USERNAME
+WorkingDirectory=/opt/msi-clock
+ExecStart=/usr/bin/python3 /opt/msi-clock/main.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/msi-clock.log
+StandardError=append:/var/log/msi-clock.log
 
-echo "Installation complete!"
-echo
-echo "Next steps:"
-echo "1. Update settings.json with your SOAP credentials"
-echo "2. Test the camera using: python3 test_components.py"
-echo "3. Start the service: sudo systemctl start timeclock"
-echo
-echo "For troubleshooting, check the logs in the logs directory"
+[Install]
+WantedBy=graphical.target
+EOF
+
+systemctl daemon-reload
+systemctl enable msi-clock
+systemctl start msi-clock
+
+# --- Final Reboot ---
+echo "Installation complete. Rebooting now..."
+reboot
