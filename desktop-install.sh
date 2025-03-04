@@ -1,9 +1,16 @@
 #!/bin/bash
-
-### MSI Time Clock Installation Script for Ubuntu Desktop ###
+### MSI TimeClock Installation Script for Ubuntu Desktop ###
 # Run this script as root after a fresh Ubuntu 24.04 Desktop installation.
 
-set -e  # Exit immediately if a command fails
+# Ensure the script is run as root
+if [[ $EUID -ne 0 ]]; then
+    echo "This script must be run as root."
+    exit 1
+fi
+
+set -e  # Exit immediately if any command fails
+
+echo "Starting MSI TimeClock installation..."
 
 # --- Cleanup Previous Partial Installations ---
 echo "Cleaning up any previous partial installations..."
@@ -11,53 +18,56 @@ systemctl stop msi-clock || true
 systemctl stop rustdesk || true
 rm -rf /opt/msi-clock
 rm -rf /var/lib/msi-clock
-rm -rf /etc/systemd/system/msi-clock.service
-rm -rf /etc/systemd/system/rustdesk.service
-rm -rf /etc/udev/rules.d/99-webcam.rules
+rm -f /etc/systemd/system/msi-clock.service
+rm -f /etc/systemd/system/rustdesk.service
+rm -f /etc/udev/rules.d/99-webcam.rules
 systemctl daemon-reload
 
 # --- Remove Unnecessary Ubuntu Desktop Applications ---
 echo "Removing unnecessary Ubuntu Desktop applications..."
-apt remove -y libreoffice-* thunderbird gnome-games gnome-calendar rhythmbox cheese aisleriot shotwell transmission-gtk simple-scan firefox
+apt remove -y libreoffice-* thunderbird gnome-games gnome-calendar rhythmbox cheese aisleriot shotwell transmission-gtk simple-scan firefox || true
 apt autoremove -y
-apt purge -y snapd
-rm -rf ~/snap
+apt purge -y snapd || true
+rm -rf /home/*/snap
 
 # --- User Account Setup ---
 USERNAME="msi-clock"
 PASSWORD="Metro2024!"
-
-# Ensure the user exists (skip creation if already exists)
-echo "Ensuring user exists: $USERNAME"
-id -u $USERNAME &>/dev/null || useradd -m -s /bin/bash "$USERNAME"
-echo "$USERNAME:$PASSWORD" | chpasswd
+echo "Setting up user account: $USERNAME"
+if ! id -u $USERNAME >/dev/null 2>&1; then
+    useradd -m -s /bin/bash "$USERNAME"
+    echo "$USERNAME:$PASSWORD" | chpasswd
+fi
 usermod -aG sudo "$USERNAME"
-usermod -aG video,input,tty "$USERNAME"  # Ensure webcam and input access
+usermod -aG video,input,tty "$USERNAME"  # Grant webcam and input permissions
 
 # --- System Update and Package Installation ---
 echo "Updating system and installing required packages..."
 apt update && apt upgrade -y
 apt install -y python3 python3-pip python3-venv python3-tk sqlite3 curl wget git network-manager v4l-utils
 
-# --- Clone and Install MSI Time Clock Application ---
-echo "Cloning MSI Clock application..."
+# --- Clone and Install MSI TimeClock Application ---
+echo "Cloning MSI TimeClock application..."
 git clone https://github.com/Metro-Staff-Inc/MSIClock2025 /opt/msi-clock
 chown -R $USERNAME:$USERNAME /opt/msi-clock
 
 # --- Set Up Python Virtual Environment ---
-echo "Creating Python virtual environment..."
+echo "Setting up Python virtual environment..."
 python3 -m venv /opt/msi-clock/venv
 source /opt/msi-clock/venv/bin/activate
+pip install --upgrade pip
 pip install -r /opt/msi-clock/requirements.txt
+deactivate
 chown -R $USERNAME:$USERNAME /opt/msi-clock/venv
 
 # --- Configure SQLite Database ---
+echo "Configuring SQLite database..."
 mkdir -p /var/lib/msi-clock
 cp /opt/msi-clock/database_template.db /var/lib/msi-clock/data.db
 chown -R $USERNAME:$USERNAME /var/lib/msi-clock
 
-# --- Configure MSI Clock to Auto-Start ---
-echo "Configuring MSI Clock to start on login..."
+# --- Configure MSI TimeClock Autostart (Desktop) ---
+echo "Configuring MSI TimeClock to autostart on user login..."
 sudo -u $USERNAME mkdir -p /home/$USERNAME/.config/autostart
 cat <<EOF > /home/$USERNAME/.config/autostart/msi-clock.desktop
 [Desktop Entry]
@@ -72,14 +82,14 @@ chown $USERNAME:$USERNAME /home/$USERNAME/.config/autostart/msi-clock.desktop
 
 # --- Install RustDesk ---
 echo "Installing RustDesk..."
-LATEST_VERSION=$(curl -s https://api.github.com/repos/rustdesk/rustdesk/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+LATEST_VERSION=$(curl -s https://api.github.com/repos/rustdesk/rustdesk/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 DEB_URL="https://github.com/rustdesk/rustdesk/releases/download/${LATEST_VERSION}/rustdesk-${LATEST_VERSION#v}-x86_64.deb"
+wget -O /tmp/rustdesk.deb "$DEB_URL" || { echo "Failed to download RustDesk."; exit 1; }
+apt install -y /tmp/rustdesk.deb || apt --fix-broken install -y
+rm /tmp/rustdesk.deb
 
-wget -O rustdesk.deb "$DEB_URL" || { echo "Failed to download RustDesk."; exit 1; }
-apt install -y ./rustdesk.deb || apt --fix-broken install -y
-rm rustdesk.deb
-
-# --- Configure RustDesk for Unattended Access ---
+# --- Configure RustDesk Autostart (Desktop) ---
+echo "Configuring RustDesk to autostart on user login..."
 sudo -u $USERNAME mkdir -p /home/$USERNAME/.config/autostart
 cat <<EOF > /home/$USERNAME/.config/autostart/rustdesk.desktop
 [Desktop Entry]
@@ -100,28 +110,31 @@ EOF
 udevadm control --reload-rules && udevadm trigger
 
 # --- Disable Automatic Updates and MOTD ---
-echo "Disabling automatic updates..."
-apt remove -y unattended-upgrades
+echo "Disabling automatic updates and MOTD..."
+apt remove -y unattended-upgrades || true
 if [ -f /etc/pam.d/sshd ]; then
-    sed -i 's/\\(\\s*\\)\\(.*motd.*\\)/#\\1\\2/' /etc/pam.d/sshd
+    sed -i 's/\(\s*\)\(.*motd.*\)/#\1\2/' /etc/pam.d/sshd
 fi
 rm -f /etc/update-motd.d/*
 
-# --- Configure Systemd Service for MSI Clock ---
+# --- Configure Systemd Service for MSI TimeClock ---
+echo "Configuring systemd service for MSI TimeClock..."
 cat <<EOF > /etc/systemd/system/msi-clock.service
 [Unit]
-Description=MSI Time Clock Application
+Description=MSI TimeClock Application
 After=network.target graphical.target
 
 [Service]
 Type=simple
-User=$USERNAME
+User=${USERNAME}
 WorkingDirectory=/opt/msi-clock
 ExecStart=/opt/msi-clock/venv/bin/python /opt/msi-clock/main.py
 Restart=always
 RestartSec=5
-StandardOutput=append:/var/log/msi-clock.log
-StandardError=append:/var/log/msi-clock.log
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/${USERNAME}/.Xauthority"
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=graphical.target
@@ -131,6 +144,8 @@ systemctl daemon-reload
 systemctl enable msi-clock
 systemctl start msi-clock
 
-# --- Final Reboot ---
-echo "Installation complete. Rebooting now..."
-reboot
+echo "Installation complete. MSI TimeClock is set to start on boot and will restart automatically if it crashes."
+
+# --- Optional Reboot ---
+# Uncomment the next line to reboot automatically after installation.
+# reboot
