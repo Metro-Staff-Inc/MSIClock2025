@@ -5,12 +5,27 @@
 
 set -e  # Exit immediately if a command fails
 
+# --- Cleanup Previous Partial Installations ---
+echo "Cleaning up any previous partial installations..."
+systemctl stop msi-clock || true
+systemctl stop rustdesk || true
+rm -rf /opt/msi-clock
+rm -rf /var/lib/msi-clock
+rm -rf /etc/systemd/system/msi-clock.service
+rm -rf /etc/systemd/system/rustdesk.service
+rm -rf /etc/udev/rules.d/99-webcam.rules
+rm -rf /home/msi-time-clock/.xinitrc
+rm -rf /home/msi-time-clock/.bash_profile
+rm -rf /home/msi-time-clock/.config/openbox
+systemctl daemon-reload
+
 # --- User Account Setup ---
 USERNAME="msi-time-clock"
 PASSWORD="Metro2024!"
 
-echo "Creating user: $USERNAME"
-useradd -m -s /bin/bash "$USERNAME"
+# Ensure the user exists (skip creation if already exists)
+echo "Ensuring user exists: $USERNAME"
+id -u $USERNAME &>/dev/null || useradd -m -s /bin/bash "$USERNAME"
 echo "$USERNAME:$PASSWORD" | chpasswd
 usermod -aG sudo "$USERNAME"
 usermod -aG video "$USERNAME"  # Ensure webcam access
@@ -18,7 +33,7 @@ usermod -aG video "$USERNAME"  # Ensure webcam access
 # --- System Update and Package Installation ---
 echo "Updating system and installing required packages..."
 apt update && apt upgrade -y
-apt install -y xserver-xorg x11-xserver-utils xinit openbox obconf python3 python3-pip sqlite3 curl wget git network-manager v4l-utils
+apt install -y xserver-xorg x11-xserver-utils xinit openbox obconf python3 python3-pip python3-venv sqlite3 curl wget git network-manager v4l-utils
 
 # --- Configure Auto-Login ---
 echo "Setting up auto-login..."
@@ -33,7 +48,7 @@ EOF
 cat <<EOF > "/home/$USERNAME/.xinitrc"
 #!/bin/sh
 exec openbox &
-exec python3 /opt/msi-clock/main.py
+exec /opt/msi-clock/venv/bin/python /opt/msi-clock/main.py
 EOF
 chown $USERNAME:$USERNAME "/home/$USERNAME/.xinitrc"
 chmod +x "/home/$USERNAME/.xinitrc"
@@ -61,7 +76,13 @@ fi
 echo "Cloning MSI Clock application..."
 git clone https://github.com/Metro-Staff-Inc/MSIClock2025 /opt/msi-clock
 chown -R $USERNAME:$USERNAME /opt/msi-clock
-pip3 install -r /opt/msi-clock/requirements.txt
+
+# --- Set Up Python Virtual Environment ---
+echo "Creating Python virtual environment..."
+python3 -m venv /opt/msi-clock/venv
+source /opt/msi-clock/venv/bin/activate
+pip install -r /opt/msi-clock/requirements.txt
+chown -R $USERNAME:$USERNAME /opt/msi-clock/venv
 
 # --- Configure SQLite Database ---
 mkdir -p /var/lib/msi-clock
@@ -121,7 +142,7 @@ After=network.target graphical.target
 Type=simple
 User=$USERNAME
 WorkingDirectory=/opt/msi-clock
-ExecStart=/usr/bin/python3 /opt/msi-clock/main.py
+ExecStart=/opt/msi-clock/venv/bin/python /opt/msi-clock/main.py
 Restart=always
 RestartSec=5
 StandardOutput=append:/var/log/msi-clock.log
