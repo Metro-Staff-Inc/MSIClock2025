@@ -172,10 +172,19 @@ class SoapClient:
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
             
+            # Generate the filename that will be used when uploading the image
+            filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg" if image_data else None
+            
+            # Log whether we have image data
+            if image_data:
+                logger.debug(f"Storing offline punch with image: {employee_id}, filename: {filename}")
+            else:
+                logger.debug(f"Storing offline punch without image: {employee_id}")
+            
             cursor.execute('''
-                INSERT INTO punches (employeeId, punchTime, punchType, imageData)
-                VALUES (?, ?, ?, ?)
-            ''', (employee_id, punch_time.isoformat(), 'OFFLINE', image_data))
+                INSERT INTO punches (employeeId, punchTime, punchType, imageData, imageFilename)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (employee_id, punch_time.isoformat(), 'OFFLINE', image_data, filename))
             
             conn.commit()
             conn.close()
@@ -200,7 +209,7 @@ class SoapClient:
             
             # Get all unsynced punches
             cursor.execute('''
-                SELECT id, employeeId, punchTime, imageData
+                SELECT id, employeeId, punchTime, imageData, imageFilename
                 FROM punches
                 WHERE synced = 0
                 ORDER BY punchTime ASC
@@ -215,17 +224,43 @@ class SoapClient:
             
             for punch in unsynced_punches:
                 try:
-                    punch_id, employee_id, punch_time, image_data = punch
+                    punch_id, employee_id, punch_time, image_data, image_filename = punch
                     punch_datetime = datetime.fromisoformat(punch_time)
                     
                     # Attempt to sync the punch
                     response = self.record_punch(
                         employee_id=employee_id,
-                        punch_time=punch_datetime,
-                        image_data=image_data
+                        punch_time=punch_datetime
                     )
                     
                     if response.get('success') and not response.get('offline'):
+                        # If punch was successful and we have image data, upload the image
+                        if image_data and image_filename:
+                            # Use the stored filename and upload the image directly
+                            client_id = str(self.settings['soap']['clientId'])
+                            
+                            try:
+                                upload_response = self.checkin_client.service.SaveImage(
+                                    _soapheaders=[self.credentials],
+                                    fileName=image_filename,
+                                    data=image_data,
+                                    dir=client_id
+                                )
+                                
+                                if upload_response:
+                                    logger.info(f"Successfully uploaded image for synced punch: {employee_id}, {image_filename}")
+                                else:
+                                    logger.warning(f"Failed to upload image for synced punch: {employee_id}, {image_filename}")
+                            except Exception as e:
+                                logger.error(f"Error uploading image for synced punch: {employee_id}, {image_filename}, error: {e}")
+                        else:
+                            # Log when no image data is available
+                            if not image_data:
+                                logger.debug(f"No image data available for synced punch: {employee_id}")
+                            if not image_filename:
+                                logger.debug(f"No image filename available for synced punch: {employee_id}")
+                        
+                        # Mark punch as synced
                         cursor.execute('''
                             UPDATE punches
                             SET synced = 1
