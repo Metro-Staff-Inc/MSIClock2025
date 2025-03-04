@@ -91,9 +91,12 @@ chown -R $USERNAME:$USERNAME /var/lib/msi-clock
 
 # --- Install RustDesk ---
 echo "Installing RustDesk..."
-wget https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-1.2.3-x86_64.deb
-apt install -y ./rustdesk-1.2.3-x86_64.deb
-rm rustdesk-1.2.3-x86_64.deb
+LATEST_VERSION=$(curl -s https://api.github.com/repos/rustdesk/rustdesk/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+DEB_URL="https://github.com/rustdesk/rustdesk/releases/download/${LATEST_VERSION}/rustdesk-${LATEST_VERSION#v}-x86_64.deb"
+
+wget -O rustdesk.deb "$DEB_URL" || { echo "Failed to download RustDesk."; exit 1; }
+apt install -y ./rustdesk.deb || apt --fix-broken install -y
+rm rustdesk.deb
 
 # --- Configure RustDesk for Unattended Access ---
 sudo -u $USERNAME mkdir -p "/home/$USERNAME/.config/openbox"
