@@ -43,21 +43,40 @@ def setup_logging():
                 security
             )
         
+        # Try to load settings to get log level
+        log_level = logging.INFO  # Default to INFO
+        try:
+            with open('settings.json', 'r') as f:
+                settings = json.load(f)
+                level_str = settings.get('logging', {}).get('level', 'INFO')
+                log_level = getattr(logging, level_str)
+                print(f"Setting log level to: {level_str}")
+        except Exception as e:
+            print(f"Could not load log level from settings: {e}")
+        
         # Configure logging with simplified format (timestamp and message only)
         logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(message)s',
+            level=log_level,
+            format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
             handlers=[
                 logging.FileHandler(os.path.join(log_dir, 'app.log')),
                 logging.StreamHandler(sys.stdout)
             ]
         )
+        
+        # Set all loggers to the configured level
+        for logger_name in logging.root.manager.loggerDict:
+            logging.getLogger(logger_name).setLevel(log_level)
+            
+        # Log the level that was set
+        logging.debug(f"Logging initialized with level: {logging.getLevelName(log_level)}")
+        
     except Exception as e:
         # If we can't write to logs, fall back to console only
         print(f"Warning: Could not set up file logging: {e}")
         logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(message)s',
+            level=logging.DEBUG,  # Use DEBUG for fallback to capture everything
+            format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
             handlers=[
                 logging.StreamHandler(sys.stdout)
             ]
@@ -424,6 +443,8 @@ class TimeClock:
 
     def create_ui(self):
         # Create main UI with settings in the content frame
+        # Pass the camera_service to TimeClockUI to avoid creating multiple instances
+        self.content_frame.camera_service = self.camera_service
         self.time_clock_ui = TimeClockUI(self.content_frame, settings=self.settings)
         self.time_clock_ui.pack(fill="both", expand=True)
 
@@ -481,6 +502,16 @@ class TimeClock:
     def check_camera(self):
         """Check camera connection"""
         try:
+            logging.debug("Periodic camera check running")
+            
+            # Check if camera is initialized without reinitializing
+            if hasattr(self.camera_service, 'is_initialized') and self.camera_service.is_initialized:
+                logging.debug("Camera is already initialized, skipping check")
+                # Don't cleanup or reinitialize if it's already working
+                self.root.after(3600000, self.check_camera)
+                return
+                
+            # Only try to initialize if it's not already initialized
             if not self.camera_service.initialize():
                 logging.warning("Camera check failed - attempting to reinitialize")
                 # Attempt to reinitialize
@@ -490,9 +521,8 @@ class TimeClock:
         except Exception as e:
             logging.error(f"Camera check failed: {e}")
         finally:
-            # Cleanup
-            self.camera_service.cleanup()
-            # Reschedule
+            # Don't cleanup here - it might be in use by the preview
+            # Only reschedule
             self.root.after(3600000, self.check_camera)
 
     def show_admin_panel_direct(self, first_launch=False):

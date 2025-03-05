@@ -16,13 +16,19 @@ class CameraService:
     def __init__(self, settings_path: str = 'settings.json'):
         self.settings = self._load_settings(settings_path)
         self.camera = None
-        self.is_initialized = False
+        self._initialized = False
         # Initialize YOLO model for person detection
         try:
             self.model = YOLO('yolov8n.pt')  # Using the smallest model for faster inference
         except Exception as e:
             logger.error(f"Failed to initialize YOLO model: {e}")
             self.model = None
+            
+    @property
+    def is_initialized(self):
+        """Property to check if camera is initialized"""
+        return self._initialized and (hasattr(self, '_fallback_mode') or
+                                     (self.camera is not None and self.camera.isOpened()))
 
     def detect_and_crop_person(self, frame: np.ndarray) -> Optional[np.ndarray]:
         """
@@ -89,34 +95,114 @@ class CameraService:
         """List all available camera devices on the system"""
         available_cameras = []
         
+        logger.debug(f"Listing available cameras on platform: {sys.platform}")
+        
         # Check for cameras on Linux
         if sys.platform != 'win32':
             import glob
-            # List all video devices
-            video_devices = glob.glob('/dev/video*')
-            logger.debug(f"Found video devices: {video_devices}")
+            import os
             
-            # Test each device
-            for device in video_devices:
-                try:
-                    cap = cv2.VideoCapture(device)
-                    if cap.isOpened():
-                        available_cameras.append(device)
-                        cap.release()
-                except Exception as e:
-                    logger.debug(f"Error testing device {device}: {e}")
+            # Log all video devices in /dev
+            logger.debug("Checking /dev directory for video devices")
+            try:
+                all_dev_files = os.listdir('/dev')
+                video_related = [f for f in all_dev_files if 'video' in f]
+                logger.debug(f"All video-related files in /dev: {video_related}")
+            except Exception as e:
+                logger.error(f"Error listing /dev directory: {e}")
+            
+            # List all video devices
+            try:
+                video_devices = glob.glob('/dev/video*')
+                logger.debug(f"Found video devices with glob: {video_devices}")
+                
+                # Test each device
+                for device in video_devices:
+                    try:
+                        logger.debug(f"Testing device: {device}")
+                        cap = cv2.VideoCapture(device)
+                        is_opened = cap.isOpened()
+                        logger.debug(f"Device {device} opened: {is_opened}")
+                        if is_opened:
+                            available_cameras.append(device)
+                            cap.release()
+                    except Exception as e:
+                        logger.error(f"Error testing device {device}: {e}")
+            except Exception as e:
+                logger.error(f"Error with glob pattern: {e}")
             
         # Check for cameras by index (works on all platforms)
+        logger.debug("Checking cameras by index")
         for i in range(10):  # Check first 10 indices
             try:
+                logger.debug(f"Testing camera index: {i}")
                 cap = cv2.VideoCapture(i)
-                if cap.isOpened():
+                is_opened = cap.isOpened()
+                logger.debug(f"Camera index {i} opened: {is_opened}")
+                if is_opened:
                     available_cameras.append(i)
                     cap.release()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"Error testing camera index {i}: {e}")
                 
-        logger.debug(f"Available cameras: {available_cameras}")
+        logger.debug(f"Final list of available cameras: {available_cameras}")
+        
+        if not available_cameras:
+            logger.warning("No cameras detected on the system")
+            # Try to get more system information
+            try:
+                import subprocess
+                import os
+                
+                # Check current user and groups
+                logger.debug("Checking current user and groups")
+                try:
+                    user_result = subprocess.run(['id'],
+                                               capture_output=True, text=True, timeout=5)
+                    logger.debug(f"Current user info: {user_result.stdout}")
+                except Exception as e:
+                    logger.debug(f"Error getting user info: {e}")
+                
+                logger.debug("Attempting to run v4l2-ctl --list-devices")
+                try:
+                    result = subprocess.run(['v4l2-ctl', '--list-devices'],
+                                           capture_output=True, text=True, timeout=5)
+                    logger.debug(f"v4l2-ctl output: {result.stdout}")
+                    if result.stderr:
+                        logger.debug(f"v4l2-ctl stderr: {result.stderr}")
+                except Exception as e:
+                    logger.debug(f"Error running v4l2-ctl: {e}")
+                
+                logger.debug("Attempting to run ls -la /dev/video*")
+                try:
+                    result = subprocess.run(['ls', '-la', '/dev/video*'],
+                                           capture_output=True, text=True, timeout=5)
+                    logger.debug(f"ls output: {result.stdout}")
+                    if result.stderr:
+                        logger.debug(f"ls stderr: {result.stderr}")
+                except Exception as e:
+                    logger.debug(f"Error running ls: {e}")
+                    
+                # Check if we have permission to access video devices
+                logger.debug("Checking video device permissions")
+                try:
+                    for i in range(10):  # Check first 10 potential video devices
+                        device_path = f"/dev/video{i}"
+                        if os.path.exists(device_path):
+                            logger.debug(f"Testing access to {device_path}")
+                            try:
+                                # Try to open the device for reading
+                                with open(device_path, 'rb') as f:
+                                    logger.debug(f"Successfully opened {device_path} for reading")
+                            except PermissionError:
+                                logger.error(f"Permission denied for {device_path}")
+                            except Exception as e:
+                                logger.error(f"Error accessing {device_path}: {e}")
+                except Exception as e:
+                    logger.debug(f"Error checking video device permissions: {e}")
+            except Exception as e:
+                logger.debug(f"Error getting additional system info: {e}")
+        
         return available_cameras
     
     def initialize(self) -> bool:
@@ -158,21 +244,37 @@ class CameraService:
             else:
                 # Linux/macOS backends
                 try:
+                    logger.debug(f"Linux camera initialization with device_id: {device_id}, type: {type(device_id)}")
+                    logger.debug(f"Available cameras: {available_cameras}")
+                    
                     # If device_id is a string (path), use it directly
                     if isinstance(device_id, str):
+                        logger.debug(f"Trying string path directly: {device_id}")
                         self.camera = cv2.VideoCapture(device_id)
+                        logger.debug(f"Direct path result: {self.camera.isOpened()}")
+                        
                         if not self.camera.isOpened():
+                            logger.debug(f"Trying with V4L2 backend: {device_id}")
                             self.camera = cv2.VideoCapture(device_id, cv2.CAP_V4L2)
+                            logger.debug(f"V4L2 result: {self.camera.isOpened()}")
                     else:
                         # Try with numeric index
+                        logger.debug(f"Trying numeric index: {device_id}")
                         self.camera = cv2.VideoCapture(device_id)
+                        logger.debug(f"Numeric index result: {self.camera.isOpened()}")
+                        
                         if not self.camera.isOpened():
                             # Try with explicit path
-                            self.camera = cv2.VideoCapture(f"/dev/video{device_id}")
+                            path = f"/dev/video{device_id}"
+                            logger.debug(f"Trying explicit path: {path}")
+                            self.camera = cv2.VideoCapture(path)
+                            logger.debug(f"Explicit path result: {self.camera.isOpened()}")
                             
                     if not self.camera.isOpened():
                         # If still not open, try any available camera
+                        logger.debug("Trying any available camera")
                         for cam in available_cameras:
+                            logger.debug(f"Trying camera: {cam}")
                             self.camera = cv2.VideoCapture(cam)
                             if self.camera.isOpened():
                                 logger.debug(f"Camera initialized with device: {cam}")
@@ -217,7 +319,7 @@ class CameraService:
                     f"Got: {actual_width}x{actual_height}"
                 )
 
-            self.is_initialized = True
+            self._initialized = True
             return True
 
         except Exception as e:
@@ -228,7 +330,11 @@ class CameraService:
     def _setup_fallback_camera(self):
         """Set up a fallback camera that returns a placeholder image"""
         logger.info("Setting up fallback camera mode")
-        self.is_initialized = True
+        # Log the stack trace to see where this is being called from
+        import traceback
+        logger.debug("Fallback camera setup called from:\n" + ''.join(traceback.format_stack()))
+        
+        self._initialized = True
         self._fallback_mode = True
         
         # Create a placeholder image
@@ -266,6 +372,7 @@ class CameraService:
         try:
             # Check if we're in fallback mode
             if hasattr(self, '_fallback_mode') and self._fallback_mode:
+                logger.debug("capture_frame: Using fallback mode")
                 frame = self._placeholder_image.copy()
                 
                 # Add timestamp to make the image dynamic
@@ -289,6 +396,7 @@ class CameraService:
                 return None
                 
             ret, frame = self.camera.read()
+            
             if not ret:
                 logger.error("Failed to capture frame")
                 return None
@@ -435,7 +543,7 @@ class CameraService:
                     self.camera = None
 
             # Reset initialization state
-            self.is_initialized = False
+            self._initialized = False
 
         except Exception as e:
             logger.error(f"Error in cleanup: {e}")
@@ -465,6 +573,65 @@ class CameraService:
         }
 
         try:
+            # Check if camera is already initialized (e.g., by the preview)
+            already_initialized = self.is_initialized
+            logger.debug(f"Camera test: Camera already initialized: {already_initialized}")
+            
+            # If camera is already initialized, we can use it directly
+            if already_initialized:
+                logger.debug("Camera test: Using already initialized camera")
+                results['initialized'] = True
+                
+                # Check if we're in fallback mode
+                if hasattr(self, '_fallback_mode') and self._fallback_mode:
+                    logger.debug("Camera test: Using fallback mode")
+                    results['fallback_mode'] = True
+                    results['capture_test'] = True  # Fallback mode always provides frames
+                    
+                    # Set resolution info
+                    width = self.settings['camera']['resolution']['width']
+                    height = self.settings['camera']['resolution']['height']
+                    results['actual_resolution'] = f"{width}x{height}"
+                    results['resolution_match'] = True
+                else:
+                    logger.debug("Camera test: Testing capture with existing camera")
+                    # Test capture with existing camera
+                    capture_result = self.capture_frame()
+                    if capture_result is not None:
+                        results['capture_test'] = True
+                        logger.debug("Camera test: Capture test successful")
+                    else:
+                        logger.debug("Camera test: Capture test failed")
+
+                    # Check resolution
+                    actual_width = self.camera.get(cv2.CAP_PROP_FRAME_WIDTH)
+                    actual_height = self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                    results['actual_resolution'] = f"{actual_width}x{actual_height}"
+                    logger.debug(f"Camera test: Actual resolution: {actual_width}x{actual_height}")
+
+                    expected_width = self.settings['camera']['resolution']['width']
+                    expected_height = self.settings['camera']['resolution']['height']
+                    results['resolution_match'] = (
+                        abs(expected_width - actual_width) <= 1 and
+                        abs(expected_height - actual_height) <= 1
+                    )
+                    logger.debug(f"Camera test: Resolution match: {results['resolution_match']}")
+                    
+                # List available cameras without trying to open them
+                # This is just for information, since we know the camera is working
+                if sys.platform != 'win32':
+                    import glob
+                    video_devices = glob.glob('/dev/video*')
+                    logger.debug(f"Camera test: Found video devices (without opening): {video_devices}")
+                    results['available_cameras'] = video_devices
+                else:
+                    # On Windows, just report the current device ID
+                    results['available_cameras'] = [self.settings['camera']['deviceId']]
+                
+                return results
+            
+            logger.debug("Camera test: No existing camera, proceeding with normal test")
+            # If not already initialized, proceed with normal test
             # List available cameras
             available_cameras = self._list_available_cameras()
             results['available_cameras'] = available_cameras

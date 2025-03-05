@@ -92,7 +92,7 @@ class SoapClient:
                 
             # Log punch attempt
             filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
-            logger.debug(f"PUNCH SEND: {employee_id}, {punch_time.isoformat()}, {filename}")
+            logger.info(f"PUNCH SEND: {employee_id}, {punch_time.isoformat()}, {filename}")
 
             # Try online punch first
             try:
@@ -337,7 +337,7 @@ class SoapClient:
         }
         
         # Log punch response
-        logger.debug(
+        logger.info(
             f"PUNCH RESPONSE: {employee_id}, "
             f"{response['lastName']}, {response['firstName']}, "
             f"{response['success']}, {response['punchType']}, "

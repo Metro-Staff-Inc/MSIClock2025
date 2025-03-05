@@ -113,9 +113,12 @@ class CameraPreview(customtkinter.CTkFrame):
     def start_preview(self):
         """Start camera preview"""
         if not self.camera_service.is_initialized:
-            if not self.camera_service.initialize():
+            init_result = self.camera_service.initialize()
+            
+            if not init_result:
                 logger.error("Failed to initialize camera for preview")
                 return
+                
         self.preview_active = True
         self.update_preview()
 
@@ -150,6 +153,7 @@ class CameraPreview(customtkinter.CTkFrame):
                 self.canvas.create_image(0, 0, image=photo, anchor="nw")
                 self.current_image = photo  # Keep reference
             else:
+                logger.error("CameraPreview: Failed to capture frame")
                 # Show error message if frame capture failed
                 self.canvas.delete("all")
                 self.canvas.create_text(
@@ -181,7 +185,19 @@ class TimeClockUI(customtkinter.CTkFrame):
         self.settings = settings if settings is not None else self._load_settings(settings_path)
         
         # Initialize services
-        self.camera_service = CameraService(settings_path)
+        logger.debug("TimeClockUI: Checking for parent camera service")
+        
+        # Use parent's camera service if available
+        if hasattr(parent, 'camera_service') and parent.camera_service is not None:
+            logger.debug("TimeClockUI: Using parent's camera service")
+            self.camera_service = parent.camera_service
+        else:
+            logger.debug("TimeClockUI: Creating new camera service")
+            self.camera_service = CameraService(settings_path)
+        
+        # Log camera settings
+        logger.debug(f"TimeClockUI: Camera settings: {self.settings.get('camera', {})}")
+        
         self.soap_client = SoapClient(settings_path)
         
         self.employee_id = customtkinter.StringVar()
@@ -196,7 +212,15 @@ class TimeClockUI(customtkinter.CTkFrame):
         # Admin panel is handled by main window
         
         # Start camera preview
-        self.camera_service.initialize()
+        logger.debug("TimeClockUI: Initializing camera service")
+        init_result = self.camera_service.initialize()
+        logger.debug(f"TimeClockUI: Camera initialization result: {init_result}")
+        
+        # Check if camera is in fallback mode
+        if hasattr(self.camera_service, '_fallback_mode'):
+            logger.debug(f"TimeClockUI: Camera fallback mode: {self.camera_service._fallback_mode}")
+        
+        logger.debug("TimeClockUI: Starting camera preview")
         self.camera_preview.start_preview()
         
         # Bind keyboard input

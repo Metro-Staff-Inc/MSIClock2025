@@ -7,7 +7,7 @@
     "clientId": 309
   },
   "camera": {
-    "deviceId": 0,
+    "deviceId": 1,
     "captureQuality": 85,
     "resolution": {
       "width": 640,

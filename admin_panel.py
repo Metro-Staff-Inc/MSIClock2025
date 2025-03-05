@@ -515,18 +515,6 @@ class AdminPanel(customtkinter.CTkToplevel):
         
         # Initial load of logs
         self.refresh_logs()
-        
-        # Setup auto-refresh every 5 seconds
-        self.after(5000, self.auto_refresh_logs)
-        
-    def auto_refresh_logs(self):
-        """Auto refresh logs if the logs tab is visible"""
-        try:
-            if self.tabview.get() == "Logs":
-                self.refresh_logs()
-        finally:
-            # Reschedule refresh
-            self.after(5000, self.auto_refresh_logs)
 
     def create_system_tab(self):
         system_tab = self.tabview.add("System")
@@ -774,7 +762,10 @@ class AdminPanel(customtkinter.CTkToplevel):
                     self.log_text.insert("1.0", f.read())
             else:
                 self.log_text.insert("1.0", "No logs found")
-                    
+            
+            # Scroll to the bottom of the log view
+            self.log_text.see("end")
+            
         except Exception as e:
             logger.error(f"Failed to refresh logs: {e}")
             self.show_error(f"Failed to refresh logs: {e}")
