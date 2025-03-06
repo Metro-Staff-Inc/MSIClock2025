@@ -15,7 +15,17 @@ class SoapClient:
     def __init__(self, settings_path: str = 'settings.json'):
         self.settings = self._load_settings(settings_path)
         self.storage = OfflineStorage(settings_path)
-        self.setup_client()
+        self.checkin_client = None
+        self.summary_client = None
+        self.credentials = None
+        self._is_online = False
+        self._connection_error = None
+        # Try initial setup but don't block on failure
+        try:
+            self.setup_client()
+        except Exception as e:
+            logger.warning(f"Initial connection failed, starting in offline mode: {e}")
+            self._connection_error = str(e)
         
     def _load_settings(self, settings_path: str) -> Dict[str, Any]:
         try:
@@ -25,8 +35,11 @@ class SoapClient:
             logger.error(f"Failed to load settings: {e}")
             raise
 
-    def setup_client(self):
-        """Initialize SOAP clients for both services"""
+    def setup_client(self) -> bool:
+        """Initialize SOAP clients for both services
+        Returns:
+            bool: True if connection successful, False otherwise
+        """
         try:
             # Base transport settings
             transport = Transport(timeout=self.settings['soap']['timeout'])
@@ -61,9 +74,52 @@ class SoapClient:
                 PWD=self.settings['soap']['password']
             )
             
+            # Test connection by checking if we can access both services
+            try:
+                # Check if required operations exist in both services
+                summary_ops = self.summary_client.service._operations
+                checkin_ops = self.checkin_client.service._operations
+                
+                if 'RecordSwipeSummary' in summary_ops and 'RecordSwipe' in checkin_ops:
+                    self._is_online = True
+                    self._connection_error = None
+                    logger.info("Successfully connected to SOAP services")
+                    return True
+                else:
+                    missing = []
+                    if 'RecordSwipeSummary' not in summary_ops:
+                        missing.append('RecordSwipeSummary')
+                    if 'RecordSwipe' not in checkin_ops:
+                        missing.append('RecordSwipe')
+                    error = f"Required SOAP operations not found: {', '.join(missing)}"
+                    logger.warning(error)
+                    self._connection_error = error
+                    return False
+            except Exception as e:
+                logger.warning(f"Connection test failed: {e}")
+                self._connection_error = str(e)
+                return False
+            
         except Exception as e:
             logger.error(f"Failed to initialize SOAP clients: {e}")
-            raise
+            self._connection_error = str(e)
+            return False
+
+    def is_online(self) -> bool:
+        """Check if service is currently online"""
+        return self._is_online
+
+    def get_connection_error(self) -> Optional[str]:
+        """Get the last connection error message"""
+        return self._connection_error
+
+    def try_reconnect(self) -> bool:
+        """Attempt to reconnect to the service
+        Returns:
+            bool: True if reconnection successful, False otherwise
+        """
+        logger.info("Attempting to reconnect to SOAP service")
+        return self.setup_client()
 
     def record_punch(self, employee_id: str, punch_time: datetime,
                     department_override: Optional[int] = None, image_data: Optional[bytes] = None) -> Dict[str, Any]:
@@ -95,7 +151,21 @@ class SoapClient:
             filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
             logger.info(f"PUNCH SEND: {employee_id}, {punch_time.isoformat()}, {filename}")
 
-            # Try online punch first
+            # If we're offline, try to reconnect first
+            if not self._is_online:
+                logger.info("Attempting to reconnect before processing punch")
+                if self.try_reconnect():
+                    logger.info("Successfully reconnected")
+                else:
+                    logger.info("Reconnection failed, storing punch locally")
+                    return self._store_offline_punch(employee_id, punch_time, image_data)
+
+            # If we're still missing clients after reconnect attempt, store offline
+            if not self.summary_client or not self.credentials:
+                logger.info("Missing SOAP clients, storing punch locally")
+                return self._store_offline_punch(employee_id, punch_time, image_data)
+
+            # Try online punch
             try:
                 # Create the request with proper header
                 if department_override:
@@ -109,17 +179,22 @@ class SoapClient:
                         swipeInput=swipe_input
                     )
                 
+                # Successful punch, we're definitely online
+                self._is_online = True
+                self._connection_error = None
                 return self._format_response(response, True, employee_id)
 
             except (Fault, TransportError, RequestException) as e:
                 logger.warning(f"Online punch failed, storing offline: {e}")
+                self._is_online = False
+                self._connection_error = str(e)
                 return self._store_offline_punch(employee_id, punch_time, image_data)
 
         except Exception as e:
             logger.error(f"Error recording punch: {e}")
             raise
 
-    def _upload_image(self, employee_id: str, image_data: bytes, 
+    def _upload_image(self, employee_id: str, image_data: bytes,
                      punch_time: datetime) -> bool:
         """Upload captured image to the server
         
@@ -136,6 +211,11 @@ class SoapClient:
         Returns:
             bool: True if upload successful, False otherwise
         """
+        # If we're offline or missing clients, don't attempt upload
+        if not self._is_online or not self.checkin_client or not self.credentials:
+            logger.info("System is offline, skipping image upload")
+            return False
+
         try:
             filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
             client_id = str(self.settings['soap']['clientId'])
@@ -147,6 +227,10 @@ class SoapClient:
                     data=image_data,
                     dir=client_id
                 )
+
+                # Successful upload means we're definitely online
+                self._is_online = True
+                self._connection_error = None
                 
                 # Check for system error codes
                 if hasattr(response, 'SystemErrorCode'):
@@ -157,8 +241,13 @@ class SoapClient:
                 
                 return True if response else False
                 
-            except Exception as e:
+            except (Fault, TransportError, RequestException) as e:
                 logger.error(f"SaveImage SOAP call failed: {str(e)}")
+                self._is_online = False
+                self._connection_error = str(e)
+                return False
+            except Exception as e:
+                logger.error(f"SaveImage SOAP call failed with unexpected error: {str(e)}")
                 return False
         except Exception as e:
             logger.error(f"Failed to upload image: {e}")
@@ -194,12 +283,29 @@ class SoapClient:
     def sync_offline_punches(self) -> Dict[str, Any]:
         """Attempt to sync stored offline punches"""
         try:
+            # If we're offline, try to reconnect first
+            if not self._is_online:
+                logger.info("Attempting to reconnect before syncing offline punches")
+                if not self.try_reconnect():
+                    logger.warning("Failed to reconnect, skipping sync")
+                    return {
+                        'total': 0,
+                        'synced': 0,
+                        'failed': 0,
+                        'error': self._connection_error
+                    }
+
             unsynced_punches = self.storage.get_unsynced_punches()
             results = {
                 'total': len(unsynced_punches),
                 'synced': 0,
-                'failed': 0
+                'failed': 0,
+                'error': None
             }
+
+            if not unsynced_punches:
+                logger.debug("No offline punches to sync")
+                return results
             
             for punch in unsynced_punches:
                 try:

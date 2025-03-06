@@ -16,32 +16,8 @@ from password_utils import hash_password
 def setup_logging():
     log_dir = "logs"
     try:
-        # Try to create logs directory with full permissions
-        os.makedirs(log_dir, exist_ok=True)
-        if sys.platform == 'win32':
-            import win32security
-            import ntsecuritycon as con
-            
-            # Get the SID for the Users group
-            users = win32security.ConvertStringSidToSid("S-1-5-32-545")
-            
-            # Set full control permissions for Users group
-            security = win32security.SECURITY_DESCRIPTOR()
-            security.SetSecurityDescriptorDacl(1, None, 0)
-            
-            dacl = win32security.ACL()
-            dacl.AddAccessAllowedAce(
-                win32security.ACL_REVISION,
-                con.FILE_ALL_ACCESS,
-                users
-            )
-            
-            security.SetSecurityDescriptorDacl(1, dacl, 0)
-            win32security.SetFileSecurity(
-                log_dir,
-                win32security.DACL_SECURITY_INFORMATION,
-                security
-            )
+        # Create logs directory with proper permissions
+        os.makedirs(log_dir, mode=0o777, exist_ok=True)
         
         # Try to load settings to get log level
         log_level = logging.INFO  # Default to INFO
@@ -54,14 +30,39 @@ def setup_logging():
         except Exception as e:
             print(f"Could not load log level from settings: {e}")
         
-        # Configure logging with simplified format (timestamp and message only)
+        # Create custom formatter that handles both normal and separator formats
+        class CustomFormatter(logging.Formatter):
+            def format(self, record):
+                # Special handling for separator messages
+                if record.msg.startswith('='*50) or record.msg.startswith('APPLICATION START'):
+                    return record.getMessage()
+                
+                # Normal message handling
+                original_levelname = record.levelname
+                # Only show level if not INFO
+                if record.levelno == logging.INFO:
+                    record.levelname = ""
+                # Format with timestamp
+                result = f"{self.formatTime(record)} - {record.levelname} - {record.getMessage()}"
+                # Restore original levelname
+                record.levelname = original_levelname
+                # Clean up extra dash for INFO level
+                if record.levelno == logging.INFO:
+                    result = result.replace(" -  -", " -")
+                return result
+
+        # Configure logging with custom formatter
+        formatter = CustomFormatter('%(asctime)s - %(levelname)s - %(message)s')
+        handlers = [
+            logging.FileHandler(os.path.join(log_dir, 'app.log')),
+            logging.StreamHandler(sys.stdout)
+        ]
+        for handler in handlers:
+            handler.setFormatter(formatter)
+        
         logging.basicConfig(
             level=log_level,
-            format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-            handlers=[
-                logging.FileHandler(os.path.join(log_dir, 'app.log')),
-                logging.StreamHandler(sys.stdout)
-            ]
+            handlers=handlers
         )
         
         # Set all loggers to the configured level
@@ -74,12 +75,12 @@ def setup_logging():
     except Exception as e:
         # If we can't write to logs, fall back to console only
         print(f"Warning: Could not set up file logging: {e}")
+        # Use same custom formatter for fallback logging
+        fallback_handler = logging.StreamHandler(sys.stdout)
+        fallback_handler.setFormatter(CustomFormatter())
         logging.basicConfig(
             level=logging.DEBUG,  # Use DEBUG for fallback to capture everything
-            format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-            handlers=[
-                logging.StreamHandler(sys.stdout)
-            ]
+            handlers=[fallback_handler]
         )
 
 class TimeClock:
@@ -142,72 +143,6 @@ class TimeClock:
         # Schedule periodic tasks
         self.schedule_tasks()
         
-    def configure_windows_focus(self):
-        """Configure Windows-specific focus settings"""
-        try:
-            import win32gui
-            import win32con
-            import ctypes
-            from ctypes import wintypes
-            
-            logging.debug("Configuring Windows-specific focus settings")
-            
-            # Try to set the app as DPI aware to prevent scaling issues
-            try:
-                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
-            except Exception as e:
-                logging.warning(f"Failed to set DPI awareness: {e}")
-            
-            # Try to disable Windows notifications during app runtime
-            try:
-                # Define necessary constants and structures
-                class FLASHWINFO(ctypes.Structure):
-                    _fields_ = [
-                        ("cbSize", wintypes.UINT),
-                        ("hwnd", wintypes.HWND),
-                        ("dwFlags", wintypes.DWORD),
-                        ("uCount", wintypes.UINT),
-                        ("dwTimeout", wintypes.DWORD)
-                    ]
-                
-                # Set app to be more resistant to focus stealing
-                SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2000
-                SPIF_SENDCHANGE = 0x2
-                ctypes.windll.user32.SystemParametersInfoW(
-                    SPI_SETFOREGROUNDLOCKTIMEOUT,
-                    0,
-                    0,  # Setting to 0 makes focus switching more immediate
-                    SPIF_SENDCHANGE
-                )
-                
-                # Try to disable Windows notifications during app runtime
-                try:
-                    # Windows 10/11 Focus Assist (Quiet Hours) API
-                    # QUERY_USER_NOTIFICATION_STATE enum values:
-                    # 1 = QUNS_BUSY - Do not disturb, no notifications
-                    # 2 = QUNS_RUNNING_D3D_FULL_SCREEN - Full-screen app running
-                    # 3 = QUNS_PRESENTATION_MODE - Presentation mode
-                    # 4 = QUNS_ACCEPTS_NOTIFICATIONS - Normal, show notifications
-                    # 5 = QUNS_QUIET_HOURS - Quiet hours, no notifications
-                    
-                    # Load the DLL
-                    shell32 = ctypes.WinDLL("shell32.dll")
-                    
-                    # Note: We've removed the SetSuspendState call that was causing hibernation issues
-                    logging.debug("Windows notification settings configured")
-                        
-                except Exception as e:
-                    logging.warning(f"Failed to configure Windows notification settings: {e}")
-                
-                logging.debug("Windows focus settings configured successfully")
-            except Exception as e:
-                logging.warning(f"Failed to configure Windows focus settings: {e}")
-                
-        except ImportError as e:
-            logging.warning(f"Windows modules not available for focus configuration: {e}")
-    
-    # Removed detect_and_configure_kiosk_mode function
-
     def create_default_settings(self):
         default_settings = {
             "soap": {
@@ -357,19 +292,13 @@ class TimeClock:
             self.settings['ui'] = {}
         self.settings['ui']['scaling_factor'] = 1.0  # No scaling
         
-        # Set window icon with platform-specific handling
+        # Set window icon using .png format
         try:
-            if sys.platform == 'win32':
-                # Windows uses .ico format
-                if os.path.exists('app.ico'):
-                    self.root.iconbitmap('app.ico')
-            else:
-                # Linux/macOS use different approach for icons with .png
-                icon_path = os.path.join('assets', 'people-dark-bg.png')
-                if os.path.exists(icon_path):
-                    from PIL import Image, ImageTk
-                    icon_img = ImageTk.PhotoImage(Image.open(icon_path))
-                    self.root.iconphoto(True, icon_img)
+            icon_path = os.path.join('assets', 'people-dark-bg.png')
+            if os.path.exists(icon_path):
+                from PIL import Image, ImageTk
+                icon_img = ImageTk.PhotoImage(Image.open(icon_path))
+                self.root.iconphoto(True, icon_img)
         except Exception as e:
             logging.warning(f"Could not set application icon: {e}")
         
@@ -424,6 +353,14 @@ class TimeClock:
         try:
             # Initialize services
             self.soap_client = SoapClient()
+            if not self.soap_client.is_online():
+                error = self.soap_client.get_connection_error()
+                logging.warning(f"Starting in offline mode: {error}")
+                messagebox.showwarning(
+                    "Network Warning",
+                    "Starting in offline mode. Punches will be stored locally and synced when connection is restored."
+                )
+
             self.camera_service = CameraService()
             
             # Test camera initialization
@@ -438,7 +375,7 @@ class TimeClock:
             logging.error(f"Failed to initialize services: {e}")
             messagebox.showerror(
                 "Error",
-                "Failed to initialize required services. The application may not function correctly."
+                "Failed to initialize required services. The application will start in offline mode."
             )
 
     def create_ui(self):
@@ -450,6 +387,9 @@ class TimeClock:
 
     def schedule_tasks(self):
         # Schedule periodic tasks
+        
+        # Try to reconnect if offline every minute
+        self.root.after(60000, self.check_connection)
         
         # Sync offline punches every 5 minutes
         self.root.after(300000, self.sync_offline_data)
@@ -463,6 +403,21 @@ class TimeClock:
         # Check for day change every minute
         self.last_day = datetime.now().day
         self.root.after(60000, self.check_day_change)
+
+    def check_connection(self):
+        """Check connection status and attempt reconnection if offline"""
+        try:
+            if not self.soap_client.is_online():
+                if self.soap_client.try_reconnect():
+                    logging.info("Successfully reconnected to SOAP service")
+                else:
+                    error = self.soap_client.get_connection_error()
+                    logging.debug(f"Still offline: {error}")
+        except Exception as e:
+            logging.error(f"Error checking connection: {e}")
+        finally:
+            # Reschedule check
+            self.root.after(60000, self.check_connection)
 
     def check_day_change(self):
         """Check if day has changed and add separator to logs"""
@@ -480,10 +435,34 @@ class TimeClock:
     def sync_offline_data(self):
         """Sync offline punch data"""
         try:
-            results = self.soap_client.sync_offline_punches()
-            logging.debug(f"Offline sync results: {results}")
+            # Only attempt sync if we're online
+            if self.soap_client.is_online():
+                results = self.soap_client.sync_offline_punches()
+                logging.debug(f"Offline sync results: {results}")
+                
+                # Show success message if any punches were synced
+                if results.get('synced', 0) > 0:
+                    messagebox.showinfo(
+                        "Sync Complete",
+                        f"Successfully synced {results['synced']} offline punches."
+                    )
+                
+                # Show warning if any failed
+                if results.get('failed', 0) > 0:
+                    messagebox.showwarning(
+                        "Sync Warning",
+                        f"Failed to sync {results['failed']} offline punches. Will retry later."
+                    )
+            else:
+                logging.debug("Skipping offline sync - system is offline")
+                
         except Exception as e:
             logging.error(f"Failed to sync offline data: {e}")
+            if self.soap_client.is_online():  # Only show error if we were supposed to be online
+                messagebox.showerror(
+                    "Sync Error",
+                    "Failed to sync offline punches. Will retry later."
+                )
         finally:
             # Reschedule
             self.root.after(300000, self.sync_offline_data)

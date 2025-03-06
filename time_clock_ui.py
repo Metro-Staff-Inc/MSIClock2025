@@ -471,7 +471,7 @@ class TimeClockUI(customtkinter.CTkFrame):
                         self.set_status(
                             "Punch saved offline",
                             "Datos guardados sin conexión",
-                            StatusColors.INACTIVE
+                            StatusColors.WARNING
                         )
                         # Reset UI after standard delay
                         self.after(3000, self.reset_ui)
