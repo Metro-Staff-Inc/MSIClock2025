@@ -24,9 +24,9 @@
     "firstLaunch": true
   },
   "storage": {
-    "retentionDays": 60,
-    "dbPath": "data/local.db",
-    "maxOfflineRecords": 50000
+    "retentionDays": 10,
+    "dbPath": "data/local.json",
+    "maxOfflineRecords": 1000
   },
   "logging": {
     "level": "INFO",

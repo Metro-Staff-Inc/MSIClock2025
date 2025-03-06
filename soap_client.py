@@ -1,19 +1,20 @@
 import os
 import json
 import logging
-import sqlite3
 from datetime import datetime
 from typing import Optional, Dict, Any
 import zeep
 from zeep import Client, Transport, xsd
 from zeep.exceptions import Fault, TransportError
 from requests.exceptions import RequestException
+from offline_storage import OfflineStorage
 
 logger = logging.getLogger(__name__)
 
 class SoapClient:
     def __init__(self, settings_path: str = 'settings.json'):
         self.settings = self._load_settings(settings_path)
+        self.storage = OfflineStorage(settings_path)
         self.setup_client()
         
     def _load_settings(self, settings_path: str) -> Dict[str, Any]:
@@ -139,7 +140,6 @@ class SoapClient:
             filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
             client_id = str(self.settings['soap']['clientId'])
             
-            
             try:
                 response = self.checkin_client.service.SaveImage(
                     _soapheaders=[self.credentials],
@@ -168,34 +168,25 @@ class SoapClient:
                            image_data: Optional[bytes] = None) -> Dict[str, Any]:
         """Store punch data locally when offline"""
         try:
-            db_path = self.settings['storage']['dbPath']
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            
             # Generate the filename that will be used when uploading the image
-            filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg" if image_data else None
-            
-            # Log whether we have image data
+            filename = None
             if image_data:
+                filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
+                # Save image to photos directory
+                os.makedirs('photos', exist_ok=True)
+                with open(os.path.join('photos', filename), 'wb') as f:
+                    f.write(image_data)
                 logger.debug(f"Storing offline punch with image: {employee_id}, filename: {filename}")
             else:
                 logger.debug(f"Storing offline punch without image: {employee_id}")
             
-            cursor.execute('''
-                INSERT INTO punches (employeeId, punchTime, punchType, imageData, imageFilename)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (employee_id, punch_time.isoformat(), 'OFFLINE', image_data, filename))
+            return self.storage.store_punch(
+                employee_id=employee_id,
+                punch_time=punch_time,
+                punch_type='OFFLINE',
+                image_filename=filename
+            )
             
-            conn.commit()
-            conn.close()
-            
-            return {
-                'success': True,
-                'offline': True,
-                'message': 'Punch stored offline',
-                'punchType': 'OFFLINE',
-                'employeeId': employee_id
-            }
         except Exception as e:
             logger.error(f"Failed to store offline punch: {e}")
             raise
@@ -203,19 +194,7 @@ class SoapClient:
     def sync_offline_punches(self) -> Dict[str, Any]:
         """Attempt to sync stored offline punches"""
         try:
-            db_path = self.settings['storage']['dbPath']
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            
-            # Get all unsynced punches
-            cursor.execute('''
-                SELECT id, employeeId, punchTime, imageData, imageFilename
-                FROM punches
-                WHERE synced = 0
-                ORDER BY punchTime ASC
-            ''')
-            
-            unsynced_punches = cursor.fetchall()
+            unsynced_punches = self.storage.get_unsynced_punches()
             results = {
                 'total': len(unsynced_punches),
                 'synced': 0,
@@ -224,8 +203,10 @@ class SoapClient:
             
             for punch in unsynced_punches:
                 try:
-                    punch_id, employee_id, punch_time, image_data, image_filename = punch
-                    punch_datetime = datetime.fromisoformat(punch_time)
+                    punch_id = punch['id']
+                    employee_id = punch['employeeId']
+                    punch_datetime = datetime.fromisoformat(punch['punchTime'])
+                    image_filename = punch.get('imageFilename')
                     
                     # Attempt to sync the punch
                     response = self.record_punch(
@@ -234,38 +215,32 @@ class SoapClient:
                     )
                     
                     if response.get('success') and not response.get('offline'):
-                        # If punch was successful and we have image data, upload the image
-                        if image_data and image_filename:
-                            # Use the stored filename and upload the image directly
-                            client_id = str(self.settings['soap']['clientId'])
-                            
-                            try:
-                                upload_response = self.checkin_client.service.SaveImage(
-                                    _soapheaders=[self.credentials],
-                                    fileName=image_filename,
-                                    data=image_data,
-                                    dir=client_id
-                                )
-                                
-                                if upload_response:
-                                    logger.info(f"Successfully uploaded image for synced punch: {employee_id}, {image_filename}")
-                                else:
-                                    logger.warning(f"Failed to upload image for synced punch: {employee_id}, {image_filename}")
-                            except Exception as e:
-                                logger.error(f"Error uploading image for synced punch: {employee_id}, {image_filename}, error: {e}")
-                        else:
-                            # Log when no image data is available
-                            if not image_data:
-                                logger.debug(f"No image data available for synced punch: {employee_id}")
-                            if not image_filename:
-                                logger.debug(f"No image filename available for synced punch: {employee_id}")
+                        # If punch was successful and we have an image file, upload it
+                        if image_filename:
+                            image_path = os.path.join('photos', image_filename)
+                            if os.path.exists(image_path):
+                                try:
+                                    with open(image_path, 'rb') as f:
+                                        image_data = f.read()
+                                    
+                                    upload_response = self.checkin_client.service.SaveImage(
+                                        _soapheaders=[self.credentials],
+                                        fileName=image_filename,
+                                        data=image_data,
+                                        dir=str(self.settings['soap']['clientId'])
+                                    )
+                                    
+                                    if upload_response:
+                                        logger.info(f"Successfully uploaded image for synced punch: {employee_id}, {image_filename}")
+                                    else:
+                                        logger.warning(f"Failed to upload image for synced punch: {employee_id}, {image_filename}")
+                                except Exception as e:
+                                    logger.error(f"Error uploading image for synced punch: {employee_id}, {image_filename}, error: {e}")
+                            else:
+                                logger.warning(f"Image file not found for synced punch: {image_filename}")
                         
                         # Mark punch as synced
-                        cursor.execute('''
-                            UPDATE punches
-                            SET synced = 1
-                            WHERE id = ?
-                        ''', (punch_id,))
+                        self.storage.mark_as_synced(punch_id)
                         results['synced'] += 1
                     else:
                         results['failed'] += 1
@@ -274,8 +249,6 @@ class SoapClient:
                     logger.error(f"Failed to sync punch {punch_id}: {e}")
                     results['failed'] += 1
             
-            conn.commit()
-            conn.close()
             return results
             
         except Exception as e:
@@ -349,23 +322,8 @@ class SoapClient:
     def cleanup_old_records(self) -> int:
         """Remove old offline records based on retention policy"""
         try:
-            db_path = self.settings['storage']['dbPath']
             retention_days = self.settings['storage']['retentionDays']
-            
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                DELETE FROM punches
-                WHERE datetime(createdAt) < datetime('now', ?)
-            ''', (f'-{retention_days} days',))
-            
-            deleted_count = cursor.rowcount
-            conn.commit()
-            conn.close()
-            
-            return deleted_count
-            
+            return self.storage.cleanup_old_records(retention_days)
         except Exception as e:
             logger.error(f"Failed to cleanup old records: {e}")
             raise
