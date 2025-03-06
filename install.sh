@@ -117,7 +117,7 @@ EOF
 chmod +x /home/$USERNAME/Desktop/msi-clock.desktop
 chown $USERNAME:$USERNAME /home/$USERNAME/Desktop/msi-clock.desktop
 
-# --- Install RustDesk ---
+# --- Install and Configure RustDesk ---
 echo "Installing RustDesk..."
 LATEST_VERSION=$(curl -s https://api.github.com/repos/rustdesk/rustdesk/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 DEB_URL="https://github.com/rustdesk/rustdesk/releases/download/${LATEST_VERSION}/rustdesk-${LATEST_VERSION#v}-x86_64.deb"
@@ -125,19 +125,33 @@ wget -O /tmp/rustdesk.deb "$DEB_URL" || { echo "Failed to download RustDesk."; e
 apt install -y /tmp/rustdesk.deb || apt --fix-broken install -y
 rm /tmp/rustdesk.deb
 
-# --- Configure RustDesk Autostart (Desktop) ---
+# Set RustDesk password
+RUSTDESK_PASSWORD="12345678"
+echo "Configuring RustDesk with unattended access..."
+
+# Create RustDesk config directory and set permissions
+sudo -u $USERNAME mkdir -p /home/$USERNAME/.config/rustdesk
+sudo -u $USERNAME bash -c "echo '$RUSTDESK_PASSWORD' > /home/$USERNAME/.config/rustdesk/password"
+chown -R $USERNAME:$USERNAME /home/$USERNAME/.config/rustdesk
+chmod 600 /home/$USERNAME/.config/rustdesk/password
+
+# Configure RustDesk Autostart with password
 echo "Configuring RustDesk to autostart on user login..."
 sudo -u $USERNAME mkdir -p /home/$USERNAME/.config/autostart
 cat <<EOF > /home/$USERNAME/.config/autostart/rustdesk.desktop
 [Desktop Entry]
 Type=Application
-Exec=rustdesk
+Exec=rustdesk --password $RUSTDESK_PASSWORD --service
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
 Name=RustDesk
 EOF
 chown $USERNAME:$USERNAME /home/$USERNAME/.config/autostart/rustdesk.desktop
+
+# Save RustDesk password for reference
+echo "RustDesk Password: $RUSTDESK_PASSWORD" > /root/rustdesk-info.txt
+chmod 600 /root/rustdesk-info.txt
 
 # --- Configure Webcam Access (Udev Rules) ---
 echo "Configuring webcam access..."
