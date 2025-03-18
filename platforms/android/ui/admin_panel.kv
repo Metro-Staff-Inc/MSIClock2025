@@ -1,0 +1,134 @@
+#:kivy 2.2.1
+#:import Styles platforms.android.ui.ui_theme.Styles
+#:import StatusColors platforms.android.ui.ui_theme.StatusColors
+
+<AdminLoginDialog>
+    title: "Admin Login"
+    type: "custom"
+    
+    MDBoxLayout:
+        orientation: "vertical"
+        padding: Styles.PADDING
+        spacing: Styles.SPACING
+        size_hint_y: None
+        height: "200dp"
+        
+        MDLabel:
+            text: "Enter Admin Password"
+            halign: "center"
+            font_style: "H6"
+        
+        MDTextField:
+            id: password_field
+            password: True
+            multiline: False
+            font_size: Styles.ENTRY_FONT_SIZE
+            helper_text: "Enter password"
+            helper_text_mode: "on_error"
+        
+        MDBoxLayout:
+            orientation: "horizontal"
+            spacing: Styles.SPACING
+            adaptive_height: True
+            
+            MDFlatButton:
+                text: "Cancel"
+                on_release: root.dismiss()
+            
+            MDRaisedButton:
+                text: "Submit"
+                md_bg_color: app.theme_cls.primary_color
+                on_release: root.verify_password(password_field.text)
+
+<AdminPanel>
+    MDBoxLayout:
+        orientation: "vertical"
+        padding: Styles.PADDING
+        
+        MDTopAppBar:
+            title: "Admin Control Panel"
+            elevation: 2
+            left_action_items: [["arrow-left", lambda x: root.go_back()]]
+            
+        MDTabs:
+            id: tabs
+            
+            Tab:
+                title: "SOAP"
+                
+                MDBoxLayout:
+                    orientation: "vertical"
+                    padding: Styles.PADDING
+                    spacing: Styles.SPACING
+                    
+                    MDTextField:
+                        id: client_id
+                        hint_text: "Client ID"
+                        helper_text: "Enter client ID"
+                        helper_text_mode: "on_error"
+                    
+                    MDTextField:
+                        id: username
+                        hint_text: "Username"
+                        helper_text: "Enter username"
+                        helper_text_mode: "on_error"
+                    
+                    MDTextField:
+                        id: password
+                        hint_text: "Password"
+                        helper_text: "Enter password"
+                        helper_text_mode: "on_error"
+            
+            Tab:
+                title: "Storage"
+                
+                MDBoxLayout:
+                    orientation: "vertical"
+                    padding: Styles.PADDING
+                    spacing: Styles.SPACING
+                    
+                    MDTextField:
+                        id: retention_days
+                        hint_text: "Retention Days"
+                        helper_text: "Number of days to keep records"
+                        helper_text_mode: "on_error"
+                        input_filter: "int"
+                    
+                    MDTextField:
+                        id: max_records
+                        hint_text: "Max Offline Records"
+                        helper_text: "Maximum number of offline records"
+                        helper_text_mode: "on_error"
+                        input_filter: "int"
+            
+            Tab:
+                title: "System"
+                
+                MDBoxLayout:
+                    orientation: "vertical"
+                    padding: Styles.PADDING
+                    spacing: Styles.SPACING
+                    
+                    Widget:
+                        size_hint_y: 0.7
+                    
+                    MDRaisedButton:
+                        text: "Close Application"
+                        md_bg_color: StatusColors.ERROR
+                        size_hint_x: 0.8
+                        pos_hint: {"center_x": 0.5}
+                        on_release: root.close_application()
+        
+        MDBoxLayout:
+            orientation: "horizontal"
+            adaptive_height: True
+            padding: Styles.PADDING
+            spacing: Styles.SPACING
+            
+            Widget:
+                size_hint_x: 0.7
+            
+            MDRaisedButton:
+                text: "Save Settings"
+                md_bg_color: app.theme_cls.primary_color
+                on_release: root.save_settings()

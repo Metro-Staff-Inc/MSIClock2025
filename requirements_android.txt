@@ -1,0 +1,11 @@
+# Base requirements
+-r requirements.txt
+
+# Android-specific dependencies
+kivy>=2.2.1          # UI framework for Android
+kivymd>=1.1.1        # Material Design widgets
+buildozer>=1.5.0     # Android packaging tool
+opencv-python>=4.8.0  # Camera operations (if available for Android)
+Pillow>=11.1.0       # Image processing
+plyer>=2.1.0         # Platform-independent access to native features
+android>=1.0.0       # Android-specific functionality

@@ -1,0 +1,30 @@
+msi-clock/
+├── assets/                      # Shared assets used by all platforms
+│   ├── fonts/
+│   │   ├── IBM-Plex-Sans.ttf
+│   │   └── IBM-Plex-Sans-Cond.ttf
+│   └── images/
+│       └── logo.png            # Common brand assets
+├── config/                      # Configuration templates
+│   └── default_settings.json   # Base settings template
+├── platforms/
+│   ├── linux/
+│   │   ├── assets/
+│   │   │   └── images/
+│   │   │       └── people-dark-bg.png
+│   │   ├── camera_service.py
+│   │   └── settings/
+│   │       └── settings.json   # Linux: typically in /etc/msi-clock/settings.json
+│   ├── android/
+│   │   ├── assets/
+│   │   │   └── images/
+│   │   ├── camera_service.py
+│   │   └── settings/
+│   │       └── settings.json   # Android: typically in app's private storage
+│   └── windows/
+│       ├── assets/
+│       │   ├── icons/
+│       │   └── images/
+│       ├── camera_service.py
+│       └── settings/
+│           └── settings.json   # Windows: typically in %APPDATA%\MSI Clock\settings.json

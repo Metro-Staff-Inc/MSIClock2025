@@ -1,0 +1,10 @@
+# Base requirements
+-r requirements.txt
+
+# Linux-specific dependencies
+customtkinter>=5.2.2  # Modern UI framework
+Pillow>=11.1.0       # Image processing
+opencv-python>=4.8.0  # Camera operations
+ultralytics>=8.0.0   # YOLOv8 for person detection
+python-xlib>=0.33    # X11 window management
+v4l2-python3>=0.3.2  # Video4Linux2 support

@@ -1,0 +1,103 @@
+#:kivy 2.2.1
+#:import Styles platforms.android.ui.ui_theme.Styles
+#:import StatusColors platforms.android.ui.ui_theme.StatusColors
+
+<TimerLabel>
+    orientation: "horizontal"
+    adaptive_height: True
+    padding: Styles.PADDING
+    
+    MDLabel:
+        id: time_label
+        font_name: "IBM Plex Sans Condensed Bold"
+        font_size: "72sp"
+        text_color: "#F0F0F0"
+        halign: "right"
+        valign: "middle"
+        size_hint_x: 0.8
+    
+    MDLabel:
+        id: ampm_label
+        font_name: "IBM Plex Sans Condensed Bold"
+        font_size: "40sp"
+        text_color: "#F0F0F0"
+        halign: "left"
+        valign: "middle"
+        size_hint_x: 0.2
+
+<TimeClockUI>
+    orientation: "vertical"
+    padding: Styles.PADDING
+    spacing: Styles.SPACING
+    md_bg_color: app.theme_cls.bg_dark
+    
+    # Top Bar with Menu
+    MDTopAppBar:
+        title: "MSI Time Clock"
+        elevation: 2
+        right_action_items: [["cog", lambda x: root.show_admin_panel()]]
+    
+    # Logo Section
+    MDBoxLayout:
+        orientation: "vertical"
+        adaptive_height: True
+        padding: Styles.PADDING
+        
+        Image:
+            source: "assets/common/logo.png"
+            size_hint: None, None
+            size: "361dp", "156dp"
+            pos_hint: {"center_x": 0.5}
+    
+    # Date and Time Section
+    MDBoxLayout:
+        orientation: "vertical"
+        adaptive_height: True
+        padding: Styles.PADDING
+        md_bg_color: "#404040"
+        radius: [8, 8, 8, 8]
+        
+        MDLabel:
+            id: date_label
+            font_name: "IBM Plex Sans Medium"
+            font_size: "24sp"
+            text_color: "#F0F0F0"
+            halign: "center"
+            adaptive_height: True
+        
+        TimerLabel:
+            id: timer_label
+        
+        # ID Entry Box
+        MDTextField:
+            id: id_entry
+            font_name: "IBM Plex Sans Medium"
+            font_size: "24sp"
+            hint_text: "Enter ID"
+            mode: "rectangle"
+            line_color_normal: "#A4D233"
+            line_color_focus: "#A4D233"
+            size_hint_x: 0.8
+            pos_hint: {"center_x": 0.5}
+            on_text_validate: root.process_punch()
+    
+    # Status Section
+    MDBoxLayout:
+        orientation: "vertical"
+        adaptive_height: True
+        padding: Styles.PADDING
+        md_bg_color: "#212121"
+        
+        MDLabel:
+            id: status_label
+            font_name: "IBM Plex Sans Medium"
+            font_size: "40sp"
+            halign: "center"
+            adaptive_height: True
+        
+        MDLabel:
+            id: status_label_es
+            font_name: "IBM Plex Sans Medium"
+            font_size: "40sp"
+            halign: "center"
+            adaptive_height: True
