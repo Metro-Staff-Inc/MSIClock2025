@@ -58,6 +58,36 @@ AutomaticLoginEnable=true
 AutomaticLogin=$USERNAME
 EOF
 
+# Disable screen blanking and DPMS (Display Power Management Signaling)
+xset s off
+xset -dpms
+xset s noblank
+
+# Disable auto suspend on AC power
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+
+# Disable auto suspend on battery (if applicable)
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
+
+# Disable automatic logout due to inactivity
+gsettings set org.gnome.desktop.session idle-delay 0
+
+# Disable Lock on Suspend
+gsettings set org.gnome.desktop.screensaver ubuntu-lock-on-suspend false
+
+# Ensure changes persist across reboots
+cat <<EOF | tee /etc/udev/rules.d/99-disable-screensaver.rules
+# Disable screen blanking on boot
+ACTION=="add", SUBSYSTEM=="drm", RUN+="/usr/bin/xset s off"
+ACTION=="add", SUBSYSTEM=="drm", RUN+="/usr/bin/xset -dpms"
+ACTION=="add", SUBSYSTEM=="drm", RUN+="/usr/bin/xset s noblank"
+EOF
+
+# Disable systemd sleep and suspend services
+systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+
+echo "All power-saving, screen blanking, and auto-locking features have been disabled."
+
 # --- System Update and Package Installation ---
 echo "Updating system and installing required packages..."
 apt update && apt upgrade -y
