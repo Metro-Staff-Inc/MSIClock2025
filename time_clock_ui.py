@@ -72,39 +72,44 @@ class CameraPreview(customtkinter.CTkFrame):
         else:
             self.settings = {}
         
-        # Configure grid for centering
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        # Calculate dimensions based on camera aspect ratio and container size
+        container_width = 420  # Width of right_column
+        container_height = 260  # Height of right_column
+        margin = 5  # Desired margin
         
-        # Configure frame appearance
-        self.configure(fg_color="transparent", corner_radius=5)  # Make frame transparent with rounded corners
+        # Maximum available space with margins
+        max_width = container_width - (2 * margin)  # 410px
+        max_height = container_height - (2 * margin)  # 250px
         
-        # Set fixed width and calculate height based on camera aspect ratio
-        self.width = 410  # Fixed width
+        # Calculate initial dimensions based on aspect ratio
         camera_width = self.camera_service.settings['camera']['resolution']['width']
         camera_height = self.camera_service.settings['camera']['resolution']['height']
         aspect_ratio = camera_height / camera_width
-        self.height = int(self.width * aspect_ratio)
         
+        # Start with maximum width
+        self.preview_width = max_width
+        self.preview_height = int(self.preview_width * aspect_ratio)
         
-        # Create frame for preview
-        self.preview_frame = customtkinter.CTkFrame(
-            self,
-            width=410,
-            height= int(410 * aspect_ratio),
-            #fg_color='#2A2A2A',  # Match the dark theme background
+        # If height exceeds maximum, scale down while maintaining aspect ratio
+        if self.preview_height > max_height:
+            self.preview_height = max_height
+            self.preview_width = int(self.preview_height / aspect_ratio)
+        
+        # Configure the frame
+        self.configure(
+            width=self.preview_width,
+            height=self.preview_height,
+            fg_color="#303030",  # Match the dark theme background
             corner_radius=5
         )
-        self.preview_frame.grid(row=0, column=0, padx=5, pady=0)
-        self.preview_frame.grid_propagate(False)
         
-        # Create canvas inside the frame
+        # Create canvas with exact dimensions
         self.canvas = customtkinter.CTkCanvas(
-            self.preview_frame,
-            width=410,
-            height=int(410 * aspect_ratio),
-            bg='#303030',  # Match the dark theme background
-            highlightthickness=0  # Remove border
+            self,
+            width=self.preview_width,
+            height=self.preview_height,
+            bg='#303030',
+            highlightthickness=0
         )
         self.canvas.place(relx=0.5, rely=0.5, anchor="center")
         
@@ -140,8 +145,8 @@ class CameraPreview(customtkinter.CTkFrame):
             result = self.camera_service.capture_frame()
             if result:
                 frame, _ = result
-                # Resize frame to match canvas size
-                frame = cv2.resize(frame, (410, 230), interpolation=cv2.INTER_AREA)
+                # Resize frame to match the fixed dimensions
+                frame = cv2.resize(frame, (self.preview_width, self.preview_height), interpolation=cv2.INTER_AREA)
                 
                 # Convert frame to PhotoImage
                 image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -178,6 +183,98 @@ class CameraPreview(customtkinter.CTkFrame):
         
         if self.preview_active:
             self.after(33, self.update_preview)  # ~30 FPS
+
+class NumericKeypadModal(customtkinter.CTkToplevel):
+    """Modal window with numeric keypad for manual ID entry"""
+    def __init__(self, parent, entry_widget):
+        super().__init__(parent)
+        
+        self.entry_widget = entry_widget
+        self.title("Manual Entry")
+        self.resizable(False, False)
+        
+        # Configure appearance
+        self.configure(fg_color="#303030")
+        
+        # Configure grid
+        self.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        
+        # Button style configuration
+        self.button_font = ('IBM Plex Sans Medium', 20)
+        self.button_width = 50
+        self.button_height = 50
+        self.button_colors = {
+            'number': {'fg_color': '#4169E1', 'hover_color': '#4169E1'},  # Blue
+            'backspace': {'fg_color': '#FFD700', 'hover_color': '#FFD700'},  # Gold
+            'clear': {'fg_color': '#FF4040', 'hover_color': '#FF4040'},  # Red
+            'confirm': {'fg_color': '#32CD32', 'hover_color': '#32CD32'}  # Green
+        }
+        
+        # Create buttons
+        self.create_buttons()
+        
+        # Position modal
+        self.position_modal()
+        
+        # Make modal stay on top
+        self.lift()
+        self.focus_force()
+        
+    def create_buttons(self):
+        # Number buttons (1-9)
+        for i in range(9):
+            row = i // 3
+            col = i % 3
+            self.create_button(str(i + 1), row, col, 'number')
+        
+        # Bottom row
+        self.create_button('0', 3, 1, 'number')  # 0 centered in bottom row
+        
+        # Special buttons (right column)
+        self.create_button('⌫', 0, 3, 'backspace')  # Backspace
+        self.create_button('✗', 1, 3, 'clear')  # Clear
+        self.create_button('✓', 2, 3, 'confirm')  # Confirm
+        
+    def create_button(self, text, row, col, button_type):
+        button = customtkinter.CTkButton(
+            self,
+            text=text,
+            width=self.button_width,
+            height=self.button_height,
+            font=self.button_font,
+            fg_color=self.button_colors[button_type]['fg_color'],
+            hover_color=self.button_colors[button_type]['hover_color'],
+            command=lambda t=text, bt=button_type: self.button_click(t, bt)
+        )
+        button.grid(row=row, column=col, padx=5, pady=5)
+        
+    def button_click(self, text, button_type):
+        current = self.entry_widget.get()
+        
+        if button_type == 'number':
+            self.entry_widget.delete(0, 'end')
+            self.entry_widget.insert(0, current + text)
+        elif button_type == 'backspace':
+            self.entry_widget.delete(0, 'end')
+            self.entry_widget.insert(0, current[:-1])
+        elif button_type == 'clear':
+            self.entry_widget.delete(0, 'end')
+            self.destroy()
+        elif button_type == 'confirm':
+            self.destroy()
+            self.master.process_punch()
+            
+    def position_modal(self):
+        # Get entry widget position
+        entry_x = self.entry_widget.winfo_rootx()
+        entry_y = self.entry_widget.winfo_rooty()
+        
+        # Calculate modal position (20px padding from entry widget)
+        modal_x = entry_x + self.entry_widget.winfo_width() + 20
+        modal_y = entry_y
+        
+        # Set size and position
+        self.geometry(f"250x280+{modal_x}+{modal_y}")
 
 class TimeClockUI(customtkinter.CTkFrame):
     def __init__(self, parent, settings: dict = None, settings_path: str = 'settings.json'):
@@ -305,7 +402,10 @@ class TimeClockUI(customtkinter.CTkFrame):
         )
         right_column.grid_propagate(False)  # Prevent frame from shrinking
         right_column.grid_columnconfigure(0, weight=1)
-        right_column.grid_rowconfigure(0, weight=1)
+        # Configure grid weights for vertical centering
+        right_column.grid_rowconfigure(0, weight=1)  # Top space
+        right_column.grid_rowconfigure(1, weight=1)  # Camera row
+        right_column.grid_rowconfigure(2, weight=1)  # Bottom space
         
         # Create panel for bottom row
         bottom_row = customtkinter.CTkFrame (
@@ -343,7 +443,8 @@ class TimeClockUI(customtkinter.CTkFrame):
         ########## Left Column - Date and Time
         left_column.grid(row=1, column=0, sticky='nsew', padx=(5,3))
         left_column.grid_columnconfigure((0), weight=1)
-        left_column.grid_rowconfigure((0,1,2), weight=0)
+        left_column.grid_rowconfigure((0,1,2,3), weight=0)
+        left_column.grid_rowconfigure(1, pad=10)  # Add padding after time display
         
         # Date
         date_label = customtkinter.CTkLabel(
@@ -362,7 +463,7 @@ class TimeClockUI(customtkinter.CTkFrame):
         
         # Time
         self.timer_label = TimerLabel(left_column)
-        self.timer_label.grid(row=1, column=0, pady=(0,30))
+        self.timer_label.grid(row=1, column=0, pady=(0,0))  # Reduce padding after time display
         
         # ID Entry Box
         self.id_entry = customtkinter.CTkEntry(
@@ -377,13 +478,29 @@ class TimeClockUI(customtkinter.CTkFrame):
             fg_color="#212121",
             text_color="#F0F0F0"
         )
-        self.id_entry.grid (row=2, column=0)
+        self.id_entry.grid(row=2, column=0)
+        
+        # Manual Entry Button
+        self.manual_entry_button = customtkinter.CTkButton(
+            left_column,
+            text="Manual Entry",
+            font=('IBM Plex Sans Medium', 16),
+            width=150,
+            height=35,
+            fg_color="#A4D233",  # Template green to match border
+            hover_color="#A4D233",  # Same as fg_color since this is a touchscreen
+            command=self.show_manual_entry
+        )
+        self.manual_entry_button.grid(row=3, column=0, pady=(5, 0))  # Reduce top padding
         
         ########## Right Column - Camera Preview
-        right_column.grid(row=1, column=1, sticky="ns", padx=(3,5))
+        right_column.grid(row=1, column=1, sticky="nsew", padx=(3,5))
+        
         # Create camera preview
         self.camera_preview = CameraPreview(right_column, self.camera_service)
-        self.camera_preview.grid(row=0, column=0)
+        
+        # Center the preview in the right column using place
+        self.camera_preview.place(relx=0.5, rely=0.5, anchor="center")
         
         ########## Bottom Row - Status Messages
         bottom_row.grid (row=2, column=0, columnspan=2, sticky="nsew")
@@ -406,6 +523,14 @@ class TimeClockUI(customtkinter.CTkFrame):
         
         # Bind Return key using correct customtkinter syntax
         self.id_entry.bind(sequence="<Return>", command=self.process_punch)
+
+    def show_manual_entry(self):
+        """Show the numeric keypad modal for manual entry"""
+        if not hasattr(self, 'keypad_modal') or not self.keypad_modal.winfo_exists():
+            self.keypad_modal = NumericKeypadModal(self, self.id_entry)
+        else:
+            self.keypad_modal.lift()
+            self.keypad_modal.focus_force()
 
     def reset_ui(self):
         """Reset UI to initial state"""
