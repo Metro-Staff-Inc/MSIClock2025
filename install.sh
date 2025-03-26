@@ -147,39 +147,72 @@ EOF
 chmod +x /home/$USERNAME/Desktop/msi-clock.desktop
 chown $USERNAME:$USERNAME /home/$USERNAME/Desktop/msi-clock.desktop
 
-# --- Install and Configure RustDesk ---
+RUSTDESK_PASSWORD="12345678"
+
 echo "Installing RustDesk..."
+
+# Get the latest RustDesk version dynamically
 LATEST_VERSION=$(curl -s https://api.github.com/repos/rustdesk/rustdesk/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 DEB_URL="https://github.com/rustdesk/rustdesk/releases/download/${LATEST_VERSION}/rustdesk-${LATEST_VERSION#v}-x86_64.deb"
+
+# Download and Install RustDesk
 wget -O /tmp/rustdesk.deb "$DEB_URL" || { echo "Failed to download RustDesk."; exit 1; }
 apt install -y /tmp/rustdesk.deb || apt --fix-broken install -y
 rm /tmp/rustdesk.deb
 
-# Set RustDesk password
-RUSTDESK_PASSWORD="12345678"
-echo "Configuring RustDesk with unattended access..."
+echo "Configuring RustDesk for unattended access..."
 
-# Create RustDesk config directory and set permissions
+# Ensure the RustDesk config directory exists
 sudo -u $USERNAME mkdir -p /home/$USERNAME/.config/rustdesk
-sudo -u $USERNAME bash -c "echo '$RUSTDESK_PASSWORD' > /home/$USERNAME/.config/rustdesk/password"
 chown -R $USERNAME:$USERNAME /home/$USERNAME/.config/rustdesk
-chmod 600 /home/$USERNAME/.config/rustdesk/password
 
-# Configure RustDesk Autostart with password
-echo "Configuring RustDesk to autostart on user login..."
-sudo -u $USERNAME mkdir -p /home/$USERNAME/.config/autostart
-cat <<EOF > /home/$USERNAME/.config/autostart/rustdesk.desktop
-[Desktop Entry]
-Type=Application
-Exec=rustdesk --password $RUSTDESK_PASSWORD --service
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-Name=RustDesk
+# Set the RustDesk password in the config file
+sudo -u $USERNAME bash -c "echo '{\"pswd_h\": \"$(echo -n $RUSTDESK_PASSWORD | sha256sum | awk '{print $1}')\"}' > /home/$USERNAME/.config/rustdesk/config.json"
+
+# Ensure proper permissions
+chmod 600 /home/$USERNAME/.config/rustdesk/config.json
+chown $USERNAME:$USERNAME /home/$USERNAME/.config/rustdesk/config.json
+
+# Set RustDesk settings for automatic display selection and no permission dialogs
+cat <<EOF > /home/$USERNAME/.config/rustdesk/settings.json
+{
+  "selected_display": "all",
+  "session_always_accept": true,
+  "session_permission_dialog": false
+}
 EOF
-chown $USERNAME:$USERNAME /home/$USERNAME/.config/autostart/rustdesk.desktop
 
-# Save RustDesk password for reference
+# Set correct ownership for settings.json
+chown $USERNAME:$USERNAME /home/$USERNAME/.config/rustdesk/settings.json
+chmod 600 /home/$USERNAME/.config/rustdesk/settings.json
+
+echo "Configuring RustDesk to autostart on system boot..."
+
+# Enable RustDesk as a system service for persistent background operation
+cat <<EOF > /etc/systemd/system/rustdesk.service
+[Unit]
+Description=RustDesk Remote Desktop
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/rustdesk --headless
+User=$USERNAME
+Restart=always
+RestartSec=5s
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload systemd, enable and start RustDesk
+systemctl daemon-reload
+systemctl enable rustdesk.service
+systemctl restart rustdesk.service
+
+echo "RustDesk configured successfully for unattended access!"
+
+# Save RustDesk connection details
 echo "RustDesk Password: $RUSTDESK_PASSWORD" > /root/rustdesk-info.txt
 chmod 600 /root/rustdesk-info.txt
 
@@ -210,6 +243,10 @@ gsettings set org.gnome.desktop.screensaver idle-activation-enabled false
 echo "Disabling notifications..."
 gsettings set org.gnome.desktop.notifications show-banners false
 gsettings set org.gnome.desktop.notifications application-activate false
+
+# --- Disable Wi-Fi Power Management ---
+echo "Disabling Wi-Fi power management..."
+sudo sed -i 's/^wifi.powersave = .*/wifi.powersave = 2/' /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf
 
 echo "Installation complete."
 # --- Optional Reboot ---

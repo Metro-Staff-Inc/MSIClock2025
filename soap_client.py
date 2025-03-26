@@ -41,19 +41,47 @@ class SoapClient:
             bool: True if connection successful, False otherwise
         """
         try:
-            # Base transport settings
-            transport = Transport(timeout=self.settings['soap']['timeout'])
+            # Base transport settings with optimized configuration
+            from requests import Session
+            session = Session()
             
-            # Initialize clients for both services
+            # Configure session for better performance
+            session.headers = {
+                'Connection': 'keep-alive',  # Use persistent connections
+                'Accept-Encoding': 'gzip, deflate',  # Enable compression
+                'Cache-Control': 'no-cache'  # Avoid caching issues
+            }
+            
+            # Set timeouts more aggressively
+            timeout = min(self.settings['soap']['timeout'], 10)  # Max 10 seconds
+            transport = Transport(timeout=timeout, session=session)
+            
+            # Log transport settings
+            logger.debug(f"SOAP transport configured with timeout={timeout}s and keep-alive connections")
+            
+            # Initialize clients with optimized settings
             base_url = f"{self.settings['soap']['endpoint']}Services"
+            
+            # Add performance logging
+            import time
+            start_time = time.time()
+            
+            # Initialize clients with simpler configuration
             self.checkin_client = Client(
                 f'{base_url}/MSIWebTraxCheckIn.asmx?WSDL',
                 transport=transport
             )
+            
+            checkin_time = time.time()
+            logger.debug(f"CheckIn client initialized in {checkin_time - start_time:.2f}s")
+            
             self.summary_client = Client(
                 f'{base_url}/MSIWebTraxCheckInSummary.asmx?WSDL',
                 transport=transport
             )
+            
+            summary_time = time.time()
+            logger.debug(f"Summary client initialized in {summary_time - checkin_time:.2f}s")
             
             # Prepare credentials as a SOAP header
             header = zeep.xsd.Element(
@@ -121,6 +149,9 @@ class SoapClient:
         logger.info("Attempting to reconnect to SOAP service")
         return self.setup_client()
 
+    # Track repeated punch attempts
+    _recent_punches = {}
+    
     def record_punch(self, employee_id: str, punch_time: datetime,
                     department_override: Optional[int] = None, image_data: Optional[bytes] = None) -> Dict[str, Any]:
         """
@@ -142,6 +173,29 @@ class SoapClient:
             - WeeklyHours: Current week's hours (if available)
         """
         try:
+            # Check for repeated punches in a short time window
+            import time
+            current_time = time.time()
+            
+            # If this employee ID has been punched recently and failed with exception 2,
+            # don't retry immediately to prevent potential system overload
+            if employee_id in SoapClient._recent_punches:
+                last_attempt, exception_code = SoapClient._recent_punches[employee_id]
+                time_diff = current_time - last_attempt
+                
+                # If less than 5 seconds have passed since the last attempt with exception 2,
+                # return the cached response to prevent rapid retries
+                if time_diff < 5.0 and exception_code == 2:
+                    logger.warning(f"Throttling repeated punch for {employee_id} - last attempt was {time_diff:.2f} seconds ago with exception {exception_code}")
+                    return {
+                        'success': False,
+                        'offline': False,
+                        'message': 'Not Authorized. No punch recorded. (Throttled)',
+                        'exception': 2,
+                        'firstName': None,
+                        'lastName': None
+                    }
+            
             # Format the swipe input string
             swipe_input = f"{employee_id}|*|{punch_time.isoformat()}"
             if department_override:
@@ -165,24 +219,102 @@ class SoapClient:
                 logger.info("Missing SOAP clients, storing punch locally")
                 return self._store_offline_punch(employee_id, punch_time, image_data)
 
-            # Try online punch
+            # Try online punch with timeout protection and performance tracking
             try:
                 # Create the request with proper header
-                if department_override:
-                    response = self.summary_client.service.RecordSwipeSummaryDepartmentOverride(
-                        _soapheaders=[self.credentials],
-                        swipeInput=swipe_input
-                    )
+                import threading
+                import time
+                
+                response_container = [None]
+                exception_container = [None]
+                timing_data = {'start': 0, 'end': 0, 'soap_start': 0, 'soap_end': 0}
+                
+                # Record start time
+                timing_data['start'] = time.time()
+                
+                def soap_call():
+                    try:
+                        # Record SOAP call start time
+                        timing_data['soap_start'] = time.time()
+                        
+                        # Pre-warm DNS and connection
+                        try:
+                            import socket
+                            endpoint = self.settings['soap']['endpoint'].replace('https://', '').replace('http://', '').split('/')[0]
+                            socket.gethostbyname(endpoint)
+                            logger.debug(f"DNS lookup for {endpoint} completed")
+                        except Exception as e:
+                            logger.debug(f"DNS pre-warm failed: {e}")
+                        
+                        # Make the actual SOAP call
+                        if department_override:
+                            response_container[0] = self.summary_client.service.RecordSwipeSummaryDepartmentOverride(
+                                _soapheaders=[self.credentials],
+                                swipeInput=swipe_input
+                            )
+                        else:
+                            response_container[0] = self.summary_client.service.RecordSwipeSummary(
+                                _soapheaders=[self.credentials],
+                                swipeInput=swipe_input
+                            )
+                        
+                        # Record SOAP call end time
+                        timing_data['soap_end'] = time.time()
+                    except Exception as e:
+                        timing_data['soap_end'] = time.time()
+                        exception_container[0] = e
+                
+                # Run SOAP call in a thread with a timeout
+                soap_thread = threading.Thread(target=soap_call)
+                soap_thread.daemon = True
+                soap_thread.start()
+                
+                # Use a shorter timeout for better responsiveness
+                timeout = min(self.settings['soap'].get('timeout', 10.0), 8.0)  # Max 8 seconds
+                soap_thread.join(timeout=timeout)
+                
+                # Record end time
+                timing_data['end'] = time.time()
+                
+                # Calculate timing information
+                total_time = timing_data['end'] - timing_data['start']
+                
+                if soap_thread.is_alive():
+                    # Thread is still running after timeout
+                    logger.error(f"SOAP call timed out for {employee_id} after {total_time:.2f}s")
+                    self._is_online = False
+                    self._connection_error = f"SOAP call timed out after {total_time:.2f}s"
+                    return self._store_offline_punch(employee_id, punch_time, image_data)
+                
+                if exception_container[0]:
+                    # Thread encountered an exception
+                    logger.error(f"SOAP call failed for {employee_id} after {total_time:.2f}s: {exception_container[0]}")
+                    raise exception_container[0]
+                
+                if response_container[0] is None:
+                    # No response but no exception either
+                    logger.error(f"SOAP call returned no response for {employee_id} after {total_time:.2f}s")
+                    self._is_online = False
+                    self._connection_error = "SOAP call returned no response"
+                    return self._store_offline_punch(employee_id, punch_time, image_data)
+                
+                # Calculate SOAP call time if available
+                if timing_data['soap_start'] > 0 and timing_data['soap_end'] > 0:
+                    soap_time = timing_data['soap_end'] - timing_data['soap_start']
+                    logger.info(f"SOAP call for {employee_id} completed in {soap_time:.2f}s (total time: {total_time:.2f}s)")
                 else:
-                    response = self.summary_client.service.RecordSwipeSummary(
-                        _soapheaders=[self.credentials],
-                        swipeInput=swipe_input
-                    )
+                    logger.info(f"SOAP call for {employee_id} completed in {total_time:.2f}s")
                 
                 # Successful punch, we're definitely online
                 self._is_online = True
                 self._connection_error = None
-                return self._format_response(response, True, employee_id)
+                response = self._format_response(response_container[0], True, employee_id)
+                
+                # Store this punch attempt with its exception code (if any)
+                exception_code = response.get('exception', None)
+                SoapClient._recent_punches[employee_id] = (current_time, exception_code)
+                
+                return response
 
             except (Fault, TransportError, RequestException) as e:
                 logger.warning(f"Online punch failed, storing offline: {e}")
@@ -217,38 +349,129 @@ class SoapClient:
             return False
 
         try:
+            import time
+            start_time = time.time()
+            
+            # Check if image needs to be optimized
+            try:
+                import io
+                from PIL import Image
+                
+                # Only optimize if image is larger than 100KB
+                if len(image_data) > 100 * 1024:
+                    logger.debug(f"Optimizing image for {employee_id} (original size: {len(image_data)/1024:.1f}KB)")
+                    
+                    # Load image
+                    img = Image.open(io.BytesIO(image_data))
+                    
+                    # Determine if resizing is needed
+                    max_dimension = 800  # Maximum width or height
+                    width, height = img.size
+                    
+                    if width > max_dimension or height > max_dimension:
+                        # Calculate new dimensions while maintaining aspect ratio
+                        if width > height:
+                            new_width = max_dimension
+                            new_height = int(height * (max_dimension / width))
+                        else:
+                            new_height = max_dimension
+                            new_width = int(width * (max_dimension / height))
+                            
+                        # Resize image
+                        img = img.resize((new_width, new_height), Image.LANCZOS)
+                        logger.debug(f"Resized image from {width}x{height} to {new_width}x{new_height}")
+                    
+                    # Save optimized image to bytes
+                    output = io.BytesIO()
+                    img.save(output, format='JPEG', quality=85, optimize=True)
+                    optimized_data = output.getvalue()
+                    
+                    # Only use optimized image if it's actually smaller
+                    if len(optimized_data) < len(image_data):
+                        logger.debug(f"Optimized image size: {len(optimized_data)/1024:.1f}KB (saved {(1 - len(optimized_data)/len(image_data))*100:.1f}%)")
+                        image_data = optimized_data
+                    else:
+                        logger.debug("Optimization did not reduce image size, using original")
+            except Exception as e:
+                logger.warning(f"Image optimization failed: {e}")
+            
             filename = f"{employee_id}__{punch_time.strftime('%Y%m%d_%H%M%S')}.jpg"
             client_id = str(self.settings['soap']['clientId'])
             
-            try:
-                response = self.checkin_client.service.SaveImage(
-                    _soapheaders=[self.credentials],
-                    fileName=filename,
-                    data=image_data,
-                    dir=client_id
-                )
-
-                # Successful upload means we're definitely online
-                self._is_online = True
-                self._connection_error = None
-                
-                # Check for system error codes
-                if hasattr(response, 'SystemErrorCode'):
-                    error_code = response.SystemErrorCode
-                    if error_code:
-                        logger.error(f"SaveImage error code: {error_code}")
-                        return False
-                
-                return True if response else False
-                
-            except (Fault, TransportError, RequestException) as e:
-                logger.error(f"SaveImage SOAP call failed: {str(e)}")
+            # Use threading with timeout for image upload
+            import threading
+            response_container = [None]
+            exception_container = [None]
+            timing_data = {'soap_start': 0, 'soap_end': 0}
+            
+            def upload_call():
+                try:
+                    timing_data['soap_start'] = time.time()
+                    response_container[0] = self.checkin_client.service.SaveImage(
+                        _soapheaders=[self.credentials],
+                        fileName=filename,
+                        data=image_data,
+                        dir=client_id
+                    )
+                    timing_data['soap_end'] = time.time()
+                except Exception as e:
+                    timing_data['soap_end'] = time.time()
+                    exception_container[0] = e
+            
+            # Run upload in a thread with a timeout
+            upload_thread = threading.Thread(target=upload_call)
+            upload_thread.daemon = True
+            upload_thread.start()
+            
+            # Use a shorter timeout for image upload
+            timeout = min(self.settings['soap'].get('timeout', 10.0), 5.0)  # Max 5 seconds for image upload
+            upload_thread.join(timeout=timeout)
+            
+            end_time = time.time()
+            total_time = end_time - start_time
+            
+            if upload_thread.is_alive():
+                # Thread is still running after timeout
+                logger.error(f"Image upload timed out for {employee_id} after {total_time:.2f}s")
                 self._is_online = False
-                self._connection_error = str(e)
+                self._connection_error = f"Image upload timed out after {total_time:.2f}s"
                 return False
-            except Exception as e:
-                logger.error(f"SaveImage SOAP call failed with unexpected error: {str(e)}")
+            
+            if exception_container[0]:
+                # Thread encountered an exception
+                logger.error(f"Image upload failed for {employee_id} after {total_time:.2f}s: {exception_container[0]}")
+                self._is_online = False
+                self._connection_error = str(exception_container[0])
                 return False
+            
+            if response_container[0] is None:
+                # No response but no exception either
+                logger.error(f"Image upload returned no response for {employee_id} after {total_time:.2f}s")
+                self._is_online = False
+                self._connection_error = "Image upload returned no response"
+                return False
+            
+            # Calculate SOAP call time if available
+            if timing_data['soap_start'] > 0 and timing_data['soap_end'] > 0:
+                soap_time = timing_data['soap_end'] - timing_data['soap_start']
+                logger.info(f"Image upload for {employee_id} completed in {soap_time:.2f}s (total time: {total_time:.2f}s)")
+            else:
+                logger.info(f"Image upload for {employee_id} completed in {total_time:.2f}s")
+            
+            # Successful upload means we're definitely online
+            self._is_online = True
+            self._connection_error = None
+            
+            # Check for system error codes
+            response = response_container[0]
+            if hasattr(response, 'SystemErrorCode'):
+                error_code = response.SystemErrorCode
+                if error_code:
+                    logger.error(f"SaveImage error code: {error_code}")
+                    return False
+            
+            return True if response else False
+                
         except Exception as e:
             logger.error(f"Failed to upload image: {e}")
             return False
@@ -402,8 +625,22 @@ class SoapClient:
 
         # Log punch exceptions at INFO level
         if hasattr(soap_response.RecordSwipeReturnInfo, 'PunchException') and soap_response.RecordSwipeReturnInfo.PunchException:
+            exception_code = soap_response.RecordSwipeReturnInfo.PunchException
+            
+            # Get the exception message if available
+            from punch_exceptions import PunchExceptions
+            exception_msg = PunchExceptions.get_message(exception_code)
+            
             # Log at INFO level so it's visible in normal operation
-            logger.info(f"PUNCH EXCEPTION: {employee_id}, exception={soap_response.RecordSwipeReturnInfo.PunchException}")
+            logger.info(f"PUNCH EXCEPTION: {employee_id}, exception={exception_code}")
+            
+            if exception_msg:
+                eng_msg, esp_msg, status_color = exception_msg
+                logger.info(f"PUNCH EXCEPTION DETAILS: {eng_msg} ({status_color})")
+                
+                # For exception code 2 (Not Authorized), add more detailed logging
+                if exception_code == 2:
+                    logger.warning(f"Not Authorized exception for {employee_id} - This may indicate an invalid employee ID or permissions issue")
             
         response = {
             'success': soap_response.RecordSwipeReturnInfo.PunchSuccess,

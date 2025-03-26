@@ -19,7 +19,7 @@ def setup_theme():
             os.makedirs(font_dir, exist_ok=True)
             
             # Copy fonts if not already present
-            fonts = ["IBM-Plex-Sans.ttf", "IBM-Plex-Sans-Cond.ttf"]
+            fonts = ["IBMPlexSans-Medium.ttf", "IBMPlexSansCondensed-Bold.ttf", "Roboto-Regular.ttf"]
             for font in fonts:
                 src = os.path.join("assets", "fonts", font)
                 dst = os.path.join(font_dir, font)

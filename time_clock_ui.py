@@ -28,7 +28,7 @@ class TimerLabel(customtkinter.CTkFrame):
         self.time_label = customtkinter.CTkLabel(
             self,
             text="",
-            font=('IBM Plex Sans Condensed Bold', 72),
+            font=('IBM Plex Sans Condensed', 72, 'bold'),
             text_color="#F0F0F0"
         )
         self.time_label.grid(row=0, column=0)
@@ -37,7 +37,7 @@ class TimerLabel(customtkinter.CTkFrame):
         self.ampm_label = customtkinter.CTkLabel(
             self,
             text="",
-            font=('IBM Plex Sans Condensed Bold', 40),
+            font=('IBM Plex Sans Condensed', 40, 'bold'),
             text_color="#F0F0F0"
         )
         self.ampm_label.grid(row=0, column=1, padx=(10, 0), pady=(25, 0))
@@ -57,7 +57,12 @@ class TimerLabel(customtkinter.CTkFrame):
         self.time_label.configure(text=f"{hour}:{minute}:{seconds}")
         self.ampm_label.configure(text=ampm)
         
-        self.after(1000, self.update_time)
+        # Force update to ensure changes are visible in remote desktop environments
+        self.time_label.update()
+        self.ampm_label.update()
+        
+        # Schedule next update with a higher priority
+        self.after_idle(lambda: self.after(1000, self.update_time))
 
 class CameraPreview(customtkinter.CTkFrame):
     """Frame that shows camera preview"""
@@ -182,7 +187,11 @@ class CameraPreview(customtkinter.CTkFrame):
             )
         
         if self.preview_active:
-            self.after(33, self.update_preview)  # ~30 FPS
+            # Force update to ensure changes are visible in remote desktop environments
+            self.canvas.update()
+            
+            # Schedule next update with a higher priority
+            self.after_idle(lambda: self.after(33, self.update_preview))  # ~30 FPS
 
 class NumericKeypadModal(customtkinter.CTkToplevel):
     """Modal window with numeric keypad for manual ID entry"""
@@ -556,11 +565,30 @@ class TimeClockUI(customtkinter.CTkFrame):
     def process_punch(self, event=None):
         """Process an employee punch"""
         import threading
+        import time
         
-        employee_id = self.employee_id.get().strip()
-        if not employee_id:
+        # Prevent multiple simultaneous punches (using instance variable)
+        if not hasattr(self, '_punch_in_progress'):
+            self._punch_in_progress = False
+            
+        if self._punch_in_progress:
+            logger.warning("Ignoring punch request - another punch is already in progress")
             return
             
+        self._punch_in_progress = True
+        
+        # Get the raw employee ID
+        raw_employee_id = self.employee_id.get().strip()
+        if not raw_employee_id:
+            TimeClockUI._punch_in_progress = False
+            return
+        
+        # Strip the 2-letter prefix if present (for image handling)
+        image_employee_id = raw_employee_id
+        if len(raw_employee_id) >= 2 and raw_employee_id[:2].isalpha():
+            image_employee_id = raw_employee_id[2:]
+            logger.info(f"Stripped prefix from ID for image handling: {raw_employee_id} -> {image_employee_id}")
+        
         # Clear entry field immediately
         self.employee_id.set("")
         self.update()  # Force update to show cleared entry
@@ -572,23 +600,30 @@ class TimeClockUI(customtkinter.CTkFrame):
             StatusColors.NORMAL
         )
         
+        # Add timestamp for performance tracking
+        start_time = time.time()
+        logger.debug(f"Starting punch processing for {raw_employee_id} at {start_time}")
+        
         def process_in_thread():
             try:
                 # Get current time once to use for both punch and photo
                 punch_time = datetime.now()
                 
-                # Capture photo first with the timestamp
-                photo_data = self.camera_service.capture_photo(employee_id, punch_time)
+                # Capture photo first with the timestamp - use stripped ID for image
+                logger.debug(f"Capturing photo for {image_employee_id}")
+                photo_data = self.camera_service.capture_photo(image_employee_id, punch_time)
                 
-                # Record punch with same timestamp
+                # Record punch with same timestamp - use full ID for punch
+                logger.debug(f"Recording punch for {raw_employee_id}")
                 response = self.soap_client.record_punch(
-                    employee_id=employee_id,
+                    employee_id=raw_employee_id,
                     punch_time=punch_time
                 )
                 
-                # If punch was successful, upload the photo with same timestamp
+                # If punch was successful, upload the photo with same timestamp - use stripped ID for image
                 if response['success'] and photo_data:
-                    self.soap_client._upload_image(employee_id, photo_data, punch_time)
+                    logger.debug(f"Uploading image for {image_employee_id}")
+                    self.soap_client._upload_image(image_employee_id, photo_data, punch_time)
                 
                 # Update UI in main thread
                 def update_ui():
@@ -642,6 +677,10 @@ class TimeClockUI(customtkinter.CTkFrame):
                 # Schedule UI update in main thread
                 self.after(0, update_ui)
                 
+                # Log completion time
+                end_time = time.time()
+                logger.debug(f"Punch processing for {raw_employee_id} completed in {end_time - start_time:.2f} seconds")
+                
             except Exception as e:
                 logger.error(f"Error processing punch: {e}")
                 def show_error():
@@ -653,6 +692,10 @@ class TimeClockUI(customtkinter.CTkFrame):
                     # Reset UI after delay
                     self.after(3000, self.reset_ui)
                 self.after(0, show_error)
+            finally:
+                # Always release the punch in progress flag (using instance variable)
+                self._punch_in_progress = False
+                logger.debug(f"Released punch lock for {raw_employee_id}")
         
         # Start processing in separate thread
         thread = threading.Thread(target=process_in_thread)
@@ -664,6 +707,9 @@ class TimeClockUI(customtkinter.CTkFrame):
         # Only set focus if no dialog/admin panel is active
         if not isinstance(self.winfo_toplevel().focus_get(), customtkinter.CTkToplevel):
             self.id_entry.focus_set()
+            
+        # Force a single update when window is activated - helps with remote desktop environments
+        self.update_idletasks()
 
 if __name__ == "__main__":
     # Test UI

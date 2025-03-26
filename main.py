@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import customtkinter
+import tkinter as tk
 from tkinter import messagebox
 from datetime import datetime
 import json
@@ -11,6 +12,88 @@ from soap_client import SoapClient
 from camera_service import CameraService
 from ui_theme import setup_theme
 from password_utils import hash_password
+
+# Custom auto-closing message box
+class AutoClosingMessageBox:
+    def __init__(self, title, message, timeout=5, message_type="info"):
+        """
+        Create an auto-closing message box
+        
+        Args:
+            title: Title of the message box
+            message: Message to display
+            timeout: Time in seconds before auto-closing (default: 5)
+            message_type: Type of message box ("info", "warning", or "error")
+        """
+        self.timeout = timeout
+        self.root = tk.Toplevel()
+        self.root.title(title)
+        self.root.resizable(False, False)
+        
+        # Set icon based on message type
+        if message_type == "warning":
+            self.root.iconwarning()
+        elif message_type == "error":
+            self.root.iconerror()
+        else:
+            self.root.iconinfo()
+            
+        # Configure grid
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_rowconfigure(1, weight=0)
+        
+        # Message label
+        self.label = tk.Label(self.root, text=message, padx=20, pady=20, wraplength=300)
+        self.label.grid(row=0, column=0, sticky="nsew")
+        
+        # OK button with countdown
+        self.button_text = tk.StringVar()
+        self.button_text.set(f"OK ({self.timeout})")
+        self.button = tk.Button(self.root, textvariable=self.button_text, command=self.close)
+        self.button.grid(row=1, column=0, pady=(0, 10))
+        
+        # Center the window
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        
+        # Start countdown
+        self.countdown()
+        
+        # Make modal
+        self.root.transient()
+        self.root.grab_set()
+        
+    def countdown(self):
+        """Update countdown and close when reaching zero"""
+        if self.timeout > 0:
+            self.button_text.set(f"OK ({self.timeout})")
+            self.timeout -= 1
+            self.root.after(1000, self.countdown)
+        else:
+            self.close()
+            
+    def close(self):
+        """Close the message box"""
+        self.root.grab_release()
+        self.root.destroy()
+
+# Wrapper functions for standard message boxes
+def show_auto_info(title, message, timeout=5):
+    """Show auto-closing info message box"""
+    return AutoClosingMessageBox(title, message, timeout, "info")
+    
+def show_auto_warning(title, message, timeout=5):
+    """Show auto-closing warning message box"""
+    return AutoClosingMessageBox(title, message, timeout, "warning")
+    
+def show_auto_error(title, message, timeout=5):
+    """Show auto-closing error message box"""
+    return AutoClosingMessageBox(title, message, timeout, "error")
 
 # Configure logging
 def setup_logging():
@@ -356,7 +439,7 @@ class TimeClock:
             if not self.soap_client.is_online():
                 error = self.soap_client.get_connection_error()
                 logging.warning(f"Starting in offline mode: {error}")
-                messagebox.showwarning(
+                show_auto_warning(
                     "Network Warning",
                     "Starting in offline mode. Punches will be stored locally and synced when connection is restored."
                 )
@@ -366,14 +449,14 @@ class TimeClock:
             # Test camera initialization
             if not self.camera_service.initialize():
                 logging.error("Failed to initialize camera")
-                messagebox.showwarning(
+                show_auto_warning(
                     "Warning",
                     "Failed to initialize camera. Photo capture will be disabled."
                 )
             
         except Exception as e:
             logging.error(f"Failed to initialize services: {e}")
-            messagebox.showerror(
+            show_auto_error(
                 "Error",
                 "Failed to initialize required services. The application will start in offline mode."
             )
@@ -442,14 +525,14 @@ class TimeClock:
                 
                 # Show success message if any punches were synced
                 if results.get('synced', 0) > 0:
-                    messagebox.showinfo(
+                    show_auto_info(
                         "Sync Complete",
                         f"Successfully synced {results['synced']} offline punches."
                     )
                 
                 # Show warning if any failed
                 if results.get('failed', 0) > 0:
-                    messagebox.showwarning(
+                    show_auto_warning(
                         "Sync Warning",
                         f"Failed to sync {results['failed']} offline punches. Will retry later."
                     )
@@ -459,7 +542,7 @@ class TimeClock:
         except Exception as e:
             logging.error(f"Failed to sync offline data: {e}")
             if self.soap_client.is_online():  # Only show error if we were supposed to be online
-                messagebox.showerror(
+                show_auto_error(
                     "Sync Error",
                     "Failed to sync offline punches. Will retry later."
                 )

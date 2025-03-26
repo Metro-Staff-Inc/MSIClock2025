@@ -6,6 +6,27 @@ from typing import Optional, Tuple, Dict
 from datetime import datetime
 import json
 import os
+import os.path
+
+# Block all outgoing connections to Google Analytics
+import socket
+original_getaddrinfo = socket.getaddrinfo
+
+def patched_getaddrinfo(*args, **kwargs):
+    if args and isinstance(args[0], str) and "google-analytics.com" in args[0]:
+        # Return an empty list to simulate a failed DNS lookup
+        return []
+    return original_getaddrinfo(*args, **kwargs)
+
+# Apply the patch
+socket.getaddrinfo = patched_getaddrinfo
+
+# Disable telemetry in ultralytics before importing
+os.environ["ULTRALYTICS_ANALYTICS"] = "0"  # Disable analytics
+os.environ["ULTRALYTICS_HIDE_CONSOLE"] = "1"  # Hide console output
+os.environ["ULTRALYTICS_HIDE_UPDATE_MSG"] = "1"  # Hide update messages
+os.environ["ULTRALYTICS_OFFLINE"] = "1"  # Force offline mode
+
 from ultralytics import YOLO
 # Suppress YOLO logging
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
