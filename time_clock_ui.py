@@ -58,8 +58,14 @@ class TimerLabel(customtkinter.CTkFrame):
         self.ampm_label.configure(text=ampm)
         
         # Force update to ensure changes are visible in remote desktop environments
-        self.time_label.update()
-        self.ampm_label.update()
+        self.time_label.update_idletasks()
+        self.ampm_label.update_idletasks()
+        
+        # Also update the parent frame to ensure it's redrawn
+        self.update_idletasks()
+        
+        # Force a window update to ensure RustDesk captures the change
+        self.winfo_toplevel().update_idletasks()
         
         # Schedule next update with a higher priority
         self.after_idle(lambda: self.after(1000, self.update_time))
@@ -162,6 +168,15 @@ class CameraPreview(customtkinter.CTkFrame):
                 self.canvas.delete("all")
                 self.canvas.create_image(0, 0, image=photo, anchor="nw")
                 self.current_image = photo  # Keep reference
+                
+                # Force immediate redraw of the canvas
+                self.canvas.update_idletasks()
+                
+                # Also update the parent frame to ensure it's redrawn
+                self.update_idletasks()
+                
+                # Force a window update to ensure RustDesk captures the change
+                self.winfo_toplevel().update_idletasks()
             else:
                 logger.error("CameraPreview: Failed to capture frame")
                 # Show error message if frame capture failed
@@ -190,8 +205,9 @@ class CameraPreview(customtkinter.CTkFrame):
             # Force update to ensure changes are visible in remote desktop environments
             self.canvas.update()
             
-            # Schedule next update with a higher priority
-            self.after_idle(lambda: self.after(33, self.update_preview))  # ~30 FPS
+            # Schedule next update with a higher priority and slightly reduced frame rate
+            # Using 50ms (20 FPS) instead of 33ms (30 FPS) to reduce CPU usage and improve remote viewing
+            self.after_idle(lambda: self.after(50, self.update_preview))  # 20 FPS
 
 class NumericKeypadModal(customtkinter.CTkToplevel):
     """Modal window with numeric keypad for manual ID entry"""
