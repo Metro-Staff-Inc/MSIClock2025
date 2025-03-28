@@ -214,6 +214,15 @@ fi
 echo "📶 Disabling Wi-Fi power management..."
 sed -i 's/^wifi.powersave = .*/wifi.powersave = 2/' /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf || true
 
+### --- 13.5 Daily Scheduled Reboot ---
+echo "🕒 Setting up daily reboot at 3:00 AM..."
+
+cat <<EOF > /etc/cron.d/daily-reboot
+0 3 * * * root /sbin/shutdown -r now
+EOF
+
+chmod 644 /etc/cron.d/daily-reboot
+
 ### --- 14. Done ---
 echo "✅ MSI TimeClock installation complete!"
 echo "📄 RustDesk password: $RUSTDESK_PASSWORD" > /root/rustdesk-info.txt
