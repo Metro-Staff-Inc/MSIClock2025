@@ -1,0 +1,13 @@
+{
+  "soap": {
+    "username": "SG360WolfMainLeft",
+    "password": "summer2014",
+    "endpoint": "http://msiwebtrax.com/",
+    "timeout": 30,
+    "clientId": 309
+  },
+  "storage": {
+    "retentionDays": 10,
+    "maxOfflineRecords": 1000
+  }
+}
