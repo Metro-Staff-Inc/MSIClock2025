@@ -57,18 +57,21 @@ class TimerLabel(customtkinter.CTkFrame):
         self.time_label.configure(text=f"{hour}:{minute}:{seconds}")
         self.ampm_label.configure(text=ampm)
         
-        # Force update to ensure changes are visible in remote desktop environments
-        self.time_label.update_idletasks()
-        self.ampm_label.update_idletasks()
-        
-        # Also update the parent frame to ensure it's redrawn
-        self.update_idletasks()
-        
-        # Force a window update to ensure RustDesk captures the change
-        self.winfo_toplevel().update_idletasks()
-        
-        # Schedule next update with a higher priority
-        self.after_idle(lambda: self.after(1000, self.update_time))
+        try:
+            # Force update to ensure changes are visible in remote desktop environments
+            self.time_label.update_idletasks()
+            self.ampm_label.update_idletasks()
+            
+            # Also update the parent frame to ensure it's redrawn
+            self.update_idletasks()
+            
+            # Force a window update to ensure RustDesk captures the change
+            self.winfo_toplevel().update_idletasks()
+        except Exception as e:
+            logger.error(f"Error updating time display: {e}")
+            
+        # Schedule next update directly without after_idle
+        self.after(1000, self.update_time)
 
 class CameraPreview(customtkinter.CTkFrame):
     """Frame that shows camera preview"""
@@ -139,13 +142,25 @@ class CameraPreview(customtkinter.CTkFrame):
         self.update_preview()
 
     def stop_preview(self):
-        """Stop camera preview"""
-        self.preview_active = False
-        if self.current_image:
-            self.canvas.delete("all")
-            self.current_image = None
-        if self.camera_service.is_initialized:
-            self.camera_service.cleanup()
+        """Stop camera preview and cleanup resources"""
+        try:
+            self.preview_active = False
+            
+            # Clear canvas and release image resources
+            if self.current_image:
+                self.canvas.delete("all")
+                self.current_image = None
+                
+            # Force garbage collection of image resources
+            import gc
+            gc.collect()
+            
+            # Cleanup camera if initialized
+            if self.camera_service.is_initialized:
+                self.camera_service.cleanup()
+                
+        except Exception as e:
+            logger.error(f"Error stopping preview: {e}")
 
     def update_preview(self):
         """Update preview frame"""
@@ -202,12 +217,20 @@ class CameraPreview(customtkinter.CTkFrame):
             )
         
         if self.preview_active:
-            # Force update to ensure changes are visible in remote desktop environments
-            self.canvas.update()
+            try:
+                # Force update to ensure changes are visible in remote desktop environments
+                self.canvas.update()
+            except Exception as e:
+                logger.error(f"Error updating preview canvas: {e}")
             
-            # Schedule next update with a higher priority and slightly reduced frame rate
+            # Schedule next update directly with error handling
             # Using 50ms (20 FPS) instead of 33ms (30 FPS) to reduce CPU usage and improve remote viewing
-            self.after_idle(lambda: self.after(50, self.update_preview))  # 20 FPS
+            if self.preview_active:  # Only schedule if still active
+                try:
+                    self.after(50, self.update_preview)  # 20 FPS
+                except Exception as e:
+                    logger.error(f"Error scheduling next preview update: {e}")
+                    self.preview_active = False  # Stop preview on scheduling error
 
 class NumericKeypadModal(customtkinter.CTkToplevel):
     """Modal window with numeric keypad for manual ID entry"""
@@ -305,6 +328,9 @@ class TimeClockUI(customtkinter.CTkFrame):
     def __init__(self, parent, settings: dict = None, settings_path: str = 'settings.json'):
         super().__init__(parent)
         self.settings = settings if settings is not None else self._load_settings(settings_path)
+        
+        # Initialize thread tracking
+        self.active_threads = set()
         
         # Initialize services
         logger.debug("TimeClockUI: Checking for parent camera service")
@@ -557,19 +583,54 @@ class TimeClockUI(customtkinter.CTkFrame):
             self.keypad_modal.lift()
             self.keypad_modal.focus_force()
 
+    def _safe_after(self, delay: int, func, *args, **kwargs):
+        """Safely schedule a function with error handling"""
+        def wrapped_func():
+            try:
+                func(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"Error in scheduled function {func.__name__}: {e}")
+                # Try to recover UI state
+                try:
+                    self.set_status("Ready", "Listo", StatusColors.NORMAL)
+                except Exception as e2:
+                    logger.error(f"Failed to recover UI state: {e2}")
+
+        try:
+            self.after(delay, wrapped_func)
+        except Exception as e:
+            logger.error(f"Failed to schedule {func.__name__}: {e}")
+
     def reset_ui(self):
         """Reset UI to initial state"""
-        self.set_status("Please scan your ID", "Por favor pase su tarjeta", StatusColors.NORMAL)
-        # Schedule focus_set after widget is fully rendered
-        self.after(100, lambda: self.id_entry.focus_set())
+        try:
+            self.set_status("Please scan your ID", "Por favor pase su tarjeta", StatusColors.NORMAL)
+            def set_focus():
+                try:
+                    self.id_entry.focus_set()
+                except Exception as e:
+                    logger.error(f"Error setting focus: {e}")
+            self._safe_after(100, set_focus)
+        except Exception as e:
+            logger.error(f"Error resetting UI: {e}")
+            # Emergency recovery
+            try:
+                self.employee_id.set("")
+                self.status_text.set("Ready")
+                self.status_text_es.set("Listo")
+            except Exception as e2:
+                logger.error(f"Failed emergency UI reset: {e2}")
 
     def set_status(self, text: str, text_es: str, color: str):
         """Update status display"""
-        self.status_text.set(text)
-        self.status_text_es.set(text_es)
-        self.status_label.configure(text_color=color)
-        self.status_label_es.configure(text_color=color)
-        self.update()  # Force update of the UI
+        try:
+            self.status_text.set(text)
+            self.status_text_es.set(text_es)
+            self.status_label.configure(text_color=color)
+            self.status_label_es.configure(text_color=color)
+            self.update()  # Force update of the UI
+        except Exception as e:
+            logger.error(f"Error setting status: {e}")
 
     def on_key_press(self, event):
         """Handle keyboard input"""
@@ -596,7 +657,7 @@ class TimeClockUI(customtkinter.CTkFrame):
         # Get the raw employee ID
         raw_employee_id = self.employee_id.get().strip()
         if not raw_employee_id:
-            TimeClockUI._punch_in_progress = False
+            self._punch_in_progress = False
             return
         
         # Strip the 2-letter prefix if present (for image handling)
@@ -641,57 +702,66 @@ class TimeClockUI(customtkinter.CTkFrame):
                     logger.debug(f"Uploading image for {image_employee_id}")
                     self.soap_client._upload_image(image_employee_id, photo_data, punch_time)
                 
-                # Update UI in main thread
+                # Update UI in main thread with error handling
                 def update_ui():
-                    if response['offline']:
-                        self.set_status(
-                            "Punch saved offline",
-                            "Datos guardados sin conexión",
-                            StatusColors.WARNING
-                        )
-                        # Reset UI after standard delay
-                        self.after(3000, self.reset_ui)
-                    elif response['success']:
-                        if response['punchType'].lower() == 'checkin':
+                    try:
+                        if response['offline']:
                             self.set_status(
-                                f"Welcome {response['firstName']}!",
-                                f"¡Bienvenido {response['firstName']}!",
-                                StatusColors.SUCCESS
+                                "Punch saved offline",
+                                "Datos guardados sin conexión",
+                                StatusColors.WARNING
                             )
-                        else:
-                            self.set_status(
-                                f"Goodbye {response['firstName']}!",
-                                f"¡Adiós {response['firstName']}!",
-                                StatusColors.SUCCESS
-                            )
-                        # Reset UI after standard delay
-                        self.after(3000, self.reset_ui)
-                    else:
-                        # Check if there's a specific exception
-                        if 'exception' in response and response['exception']:
-                            exception_msg = PunchExceptions.get_message(response['exception'])
-                            if exception_msg:
-                                eng_msg, esp_msg, status_color = exception_msg
+                            self._safe_after(3000, self.reset_ui)
+                        elif response['success']:
+                            if response['punchType'].lower() == 'checkin':
                                 self.set_status(
-                                    eng_msg,
-                                    esp_msg,
-                                    getattr(StatusColors, status_color)
+                                    f"Welcome {response['firstName']}!",
+                                    f"¡Bienvenido {response['firstName']}!",
+                                    StatusColors.SUCCESS
                                 )
-                                # Reset UI after longer delay for exceptions (6 seconds)
-                                self.after(6000, self.reset_ui)
-                                return
-                        
-                        # Default error message if no specific exception is found
-                        self.set_status(
-                            "Punch failed - Please try again",
-                            "Error - Por favor intente de nuevo",
-                            StatusColors.ERROR
-                        )
-                        # Reset UI after standard delay
-                        self.after(3000, self.reset_ui)
+                            else:
+                                self.set_status(
+                                    f"Goodbye {response['firstName']}!",
+                                    f"¡Adiós {response['firstName']}!",
+                                    StatusColors.SUCCESS
+                                )
+                            self._safe_after(3000, self.reset_ui)
+                        else:
+                            # Check if there's a specific exception
+                            if 'exception' in response and response['exception']:
+                                exception_msg = PunchExceptions.get_message(response['exception'])
+                                if exception_msg:
+                                    eng_msg, esp_msg, status_color = exception_msg
+                                    self.set_status(
+                                        eng_msg,
+                                        esp_msg,
+                                        getattr(StatusColors, status_color)
+                                    )
+                                    self._safe_after(6000, self.reset_ui)
+                                    return
+                            
+                            # Default error message if no specific exception is found
+                            self.set_status(
+                                "Punch failed - Please try again",
+                                "Error - Por favor intente de nuevo",
+                                StatusColors.ERROR
+                            )
+                            self._safe_after(3000, self.reset_ui)
+                    except Exception as e:
+                        logger.error(f"Error in UI update: {e}")
+                        # Emergency UI reset
+                        try:
+                            self.set_status(
+                                "System Error",
+                                "Error del sistema",
+                                StatusColors.ERROR
+                            )
+                            self._safe_after(3000, self.reset_ui)
+                        except Exception as e2:
+                            logger.error(f"Failed emergency UI update: {e2}")
                 
-                # Schedule UI update in main thread
-                self.after(0, update_ui)
+                # Schedule UI update in main thread with error handling
+                self._safe_after(0, update_ui)
                 
                 # Log completion time
                 end_time = time.time()
@@ -700,23 +770,75 @@ class TimeClockUI(customtkinter.CTkFrame):
             except Exception as e:
                 logger.error(f"Error processing punch: {e}")
                 def show_error():
-                    self.set_status(
-                        "System Error - Please try again",
-                        "Error del sistema - Por favor intente de nuevo",
-                        StatusColors.ERROR
-                    )
-                    # Reset UI after delay
-                    self.after(3000, self.reset_ui)
-                self.after(0, show_error)
+                    try:
+                        self.set_status(
+                            "System Error - Please try again",
+                            "Error del sistema - Por favor intente de nuevo",
+                            StatusColors.ERROR
+                        )
+                        self._safe_after(3000, self.reset_ui)
+                    except Exception as e2:
+                        logger.error(f"Failed to show error status: {e2}")
+                self._safe_after(0, show_error)
             finally:
                 # Always release the punch in progress flag (using instance variable)
                 self._punch_in_progress = False
                 logger.debug(f"Released punch lock for {raw_employee_id}")
         
-        # Start processing in separate thread
-        thread = threading.Thread(target=process_in_thread)
+        # Start processing in separate thread with tracking
+        thread = threading.Thread(target=self._tracked_thread_wrapper, args=(process_in_thread,))
         thread.daemon = True  # Thread will be terminated when main program exits
+        self.active_threads.add(thread)
         thread.start()
+    
+    def _tracked_thread_wrapper(self, target_func):
+        """Wrapper to track thread completion and cleanup"""
+        try:
+            target_func()
+        except Exception as e:
+            logger.error(f"Thread error: {e}")
+        finally:
+            # Remove thread from tracking set
+            current = threading.current_thread()
+            self.active_threads.discard(current)
+
+    def _on_close(self):
+        """Handle window close event"""
+        try:
+            # Stop camera preview
+            if hasattr(self, 'camera_preview'):
+                self.camera_preview.stop_preview()
+
+            # Wait for active threads to complete (with timeout)
+            import time
+            timeout = time.time() + 5  # 5 second timeout
+            while self.active_threads and time.time() < timeout:
+                # Copy set to avoid modification during iteration
+                for thread in list(self.active_threads):
+                    thread.join(0.1)  # Short timeout to keep UI responsive
+                    if not thread.is_alive():
+                        self.active_threads.discard(thread)
+
+            # Log warning if any threads are still active
+            if self.active_threads:
+                logger.warning(f"{len(self.active_threads)} threads still active during shutdown")
+
+            # Cleanup camera service
+            if self.camera_service:
+                self.camera_service.cleanup()
+
+            # Force final garbage collection
+            import gc
+            gc.collect()
+
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+        finally:
+            # Destroy window
+            try:
+                self.winfo_toplevel().destroy()
+            except Exception as e:
+                logger.error(f"Error destroying window: {e}")
     
     def on_window_activate(self, event=None):
         """Handle window activation"""

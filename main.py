@@ -487,20 +487,38 @@ class TimeClock:
         self.last_day = datetime.now().day
         self.root.after(60000, self.check_day_change)
 
+    def _schedule_periodic_task(self, task, delay):
+        """Schedule a periodic task with error handling"""
+        def wrapped_task():
+            try:
+                task()
+            except Exception as e:
+                logging.error(f"Error in periodic task {task.__name__}: {e}")
+            finally:
+                try:
+                    self.root.after(delay, wrapped_task)
+                except Exception as e:
+                    logging.error(f"Failed to reschedule {task.__name__}: {e}")
+                    # Emergency reschedule attempt
+                    try:
+                        self.root.after(delay * 2, wrapped_task)  # Try again with double delay
+                    except Exception as e:
+                        logging.critical(f"Failed emergency reschedule of {task.__name__}: {e}")
+        
+        # Initial schedule
+        try:
+            self.root.after(delay, wrapped_task)
+        except Exception as e:
+            logging.error(f"Failed to schedule {task.__name__}: {e}")
+
     def check_connection(self):
         """Check connection status and attempt reconnection if offline"""
-        try:
-            if not self.soap_client.is_online():
-                if self.soap_client.try_reconnect():
-                    logging.info("Successfully reconnected to SOAP service")
-                else:
-                    error = self.soap_client.get_connection_error()
-                    logging.debug(f"Still offline: {error}")
-        except Exception as e:
-            logging.error(f"Error checking connection: {e}")
-        finally:
-            # Reschedule check
-            self.root.after(60000, self.check_connection)
+        if not self.soap_client.is_online():
+            if self.soap_client.try_reconnect():
+                logging.info("Successfully reconnected to SOAP service")
+            else:
+                error = self.soap_client.get_connection_error()
+                logging.debug(f"Still offline: {error}")
 
     def check_day_change(self):
         """Check if day has changed and add separator to logs"""
@@ -511,81 +529,51 @@ class TimeClock:
             logging.info(f"MSI Time Clock - {datetime.now().strftime('%A, %B %d, %Y')}")
             logging.info("="*50)
             self.last_day = current_day
-        
-        # Reschedule check
-        self.root.after(60000, self.check_day_change)
 
     def sync_offline_data(self):
         """Sync offline punch data"""
-        try:
-            # Only attempt sync if we're online
-            if self.soap_client.is_online():
-                results = self.soap_client.sync_offline_punches()
-                logging.debug(f"Offline sync results: {results}")
-                
-                # Show success message if any punches were synced
-                if results.get('synced', 0) > 0:
-                    show_auto_info(
-                        "Sync Complete",
-                        f"Successfully synced {results['synced']} offline punches."
-                    )
-                
-                # Show warning if any failed
-                if results.get('failed', 0) > 0:
-                    show_auto_warning(
-                        "Sync Warning",
-                        f"Failed to sync {results['failed']} offline punches. Will retry later."
-                    )
-            else:
-                logging.debug("Skipping offline sync - system is offline")
-                
-        except Exception as e:
-            logging.error(f"Failed to sync offline data: {e}")
-            if self.soap_client.is_online():  # Only show error if we were supposed to be online
-                show_auto_error(
-                    "Sync Error",
-                    "Failed to sync offline punches. Will retry later."
+        # Only attempt sync if we're online
+        if self.soap_client.is_online():
+            results = self.soap_client.sync_offline_punches()
+            logging.debug(f"Offline sync results: {results}")
+            
+            # Show success message if any punches were synced
+            if results.get('synced', 0) > 0:
+                show_auto_info(
+                    "Sync Complete",
+                    f"Successfully synced {results['synced']} offline punches."
                 )
-        finally:
-            # Reschedule
-            self.root.after(300000, self.sync_offline_data)
+            
+            # Show warning if any failed
+            if results.get('failed', 0) > 0:
+                show_auto_warning(
+                    "Sync Warning",
+                    f"Failed to sync {results['failed']} offline punches. Will retry later."
+                )
+        else:
+            logging.debug("Skipping offline sync - system is offline")
 
     def cleanup_old_records(self):
         """Clean up old records"""
-        try:
-            count = self.soap_client.cleanup_old_records()
-            logging.debug(f"Cleaned up {count} old records")
-        except Exception as e:
-            logging.error(f"Failed to cleanup old records: {e}")
-        finally:
-            # Reschedule
-            self.root.after(86400000, self.cleanup_old_records)
+        count = self.soap_client.cleanup_old_records()
+        logging.debug(f"Cleaned up {count} old records")
 
     def check_camera(self):
         """Check camera connection"""
-        try:
-            logging.debug("Periodic camera check running")
+        logging.debug("Periodic camera check running")
+        
+        # Check if camera is initialized without reinitializing
+        if hasattr(self.camera_service, 'is_initialized') and self.camera_service.is_initialized:
+            logging.debug("Camera is already initialized, skipping check")
+            return
             
-            # Check if camera is initialized without reinitializing
-            if hasattr(self.camera_service, 'is_initialized') and self.camera_service.is_initialized:
-                logging.debug("Camera is already initialized, skipping check")
-                # Don't cleanup or reinitialize if it's already working
-                self.root.after(3600000, self.check_camera)
-                return
-                
-            # Only try to initialize if it's not already initialized
+        # Only try to initialize if it's not already initialized
+        if not self.camera_service.initialize():
+            logging.warning("Camera check failed - attempting to reinitialize")
+            # Attempt to reinitialize
+            self.camera_service.cleanup()
             if not self.camera_service.initialize():
-                logging.warning("Camera check failed - attempting to reinitialize")
-                # Attempt to reinitialize
-                self.camera_service.cleanup()
-                if not self.camera_service.initialize():
-                    logging.error("Failed to reinitialize camera")
-        except Exception as e:
-            logging.error(f"Camera check failed: {e}")
-        finally:
-            # Don't cleanup here - it might be in use by the preview
-            # Only reschedule
-            self.root.after(3600000, self.check_camera)
+                logging.error("Failed to reinitialize camera")
 
     def show_admin_panel_direct(self, first_launch=False):
         """Show admin panel directly without password prompt"""

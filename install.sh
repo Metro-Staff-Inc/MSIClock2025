@@ -1,194 +1,150 @@
 #!/bin/bash
-### MSI TimeClock Installation Script for Ubuntu Desktop ###
-# Run this script as root after a fresh Ubuntu 24.04 Desktop installation.
+# MSI TimeClock 2025 Ubuntu 24.04 Installer
+# Run as root after fresh Ubuntu Desktop install
 
-# Ensure the script is run as root
+set -e  # Exit on error
+set -o pipefail
+
+### --- Configuration ---
+USERNAME="msi-clock"
+PASSWORD="Metro2024!"
+RUSTDESK_PASSWORD="12345678"
+CUSTOM_ANYDESK_URL="https://my.anydesk.com/v2/builds/download/708681/Linux-AnyDesk.tar.gz"
+REPO_URL="https://github.com/Metro-Staff-Inc/MSIClock2025"
+INSTALL_DIR="/opt/msi-clock"
+FONT_DIR="/usr/local/share/fonts/msi-clock"
+TMP_DIR="/tmp/msi-timeclock-install"
+
+### --- Must be run as root ---
 if [[ $EUID -ne 0 ]]; then
-    echo "This script must be run as root."
+    echo "❌ This script must be run as root."
     exit 1
 fi
 
-set -e  # Exit immediately if any command fails
+echo "🛠️ Starting MSI TimeClock installation..."
 
-echo "Starting MSI TimeClock installation..."
-
-# --- Cleanup Previous Partial Installations ---
-echo "Cleaning up any previous partial installations..."
+### --- 0. Cleanup ---
+echo "🧹 Cleaning up previous installations..."
 systemctl stop msi-clock || true
 systemctl stop rustdesk || true
-rm -rf /opt/msi-clock
-rm -rf /var/lib/msi-clock
-rm -f /etc/systemd/system/msi-clock.service
-rm -f /etc/systemd/system/rustdesk.service
+systemctl stop anydesk || true
+rm -rf "$INSTALL_DIR" /var/lib/msi-clock "$TMP_DIR"
+rm -f /etc/systemd/system/{msi-clock.service,rustdesk.service}
 rm -f /etc/udev/rules.d/99-webcam.rules
+systemctl daemon-reexec
 systemctl daemon-reload
 
-# --- Remove Unnecessary Ubuntu Desktop Applications ---
-echo "Removing unnecessary Ubuntu Desktop applications..."
-apt remove -y libreoffice-* thunderbird gnome-games gnome-calendar rhythmbox cheese aisleriot shotwell transmission-gtk simple-scan firefox || true
-apt autoremove -y
-apt purge -y snapd || true
+### --- 1. Remove Unwanted Applications ---
+echo "🧼 Removing default Ubuntu apps..."
+apt purge -y libreoffice-* thunderbird gnome-games gnome-calendar rhythmbox cheese aisleriot shotwell transmission-gtk simple-scan firefox snapd || true
 rm -rf /home/*/snap
+apt autoremove -y
 
-# --- User Account Setup ---
-USERNAME="msi-clock"
-PASSWORD="Metro2024!"
-echo "Setting up user account: $USERNAME"
-if ! id -u $USERNAME >/dev/null 2>&1; then
+### --- 2. Create msi-clock User ---
+echo "👤 Creating user: $USERNAME"
+if ! id "$USERNAME" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "$USERNAME"
     echo "$USERNAME:$PASSWORD" | chpasswd
 fi
-usermod -aG sudo "$USERNAME"
-usermod -aG video,input,tty "$USERNAME"  # Grant webcam and input permissions
+usermod -aG sudo,video,input,tty "$USERNAME"
 
-# --- Configure Autologin ---
-echo "Configuring autologin for $USERNAME..."
-mkdir -p /etc/systemd/system/getty@tty1.service.d/
-cat <<EOF > /etc/systemd/system/getty@tty1.service.d/override.conf
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin $USERNAME --noclear %I \$TERM
-EOF
-
-# Also configure GDM autologin for desktop environment
+### --- 3. Force GDM to use X11 & Autologin ---
+echo "🖥️ Configuring GDM to use X11..."
 mkdir -p /etc/gdm3
-cat <<EOF > /etc/gdm3/custom.conf
-[daemon]
-AutomaticLoginEnable=true
-AutomaticLogin=$USERNAME
+sed -i '/^\[daemon\]/a AutomaticLoginEnable=true\nAutomaticLogin='$USERNAME /etc/gdm3/custom.conf || echo -e "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=$USERNAME" > /etc/gdm3/custom.conf
+sed -i 's/^#WaylandEnable=/WaylandEnable=/;s/^WaylandEnable=.*/WaylandEnable=false/' /etc/gdm3/custom.conf
+
+mkdir -p /var/lib/AccountsService/users
+cat <<EOF > /var/lib/AccountsService/users/$USERNAME
+[User]
+Session=ubuntu-xorg
+XSession=ubuntu-xorg
 EOF
 
-# Disable screen blanking and DPMS (Display Power Management Signaling)
-xset s off
-xset -dpms
-xset s noblank
-
-# Disable auto suspend on AC power
+### --- 4. Disable Power Saving, Locking, Notifications ---
+echo "🔌 Disabling power saving and screen blanking for $USERNAME..."
+sudo -u "$USERNAME" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u $USERNAME)/bus" bash <<EOF
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
-
-# Disable auto suspend on battery (if applicable)
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
-
-# Disable automatic logout due to inactivity
 gsettings set org.gnome.desktop.session idle-delay 0
-
-# Disable Lock on Suspend
-gsettings set org.gnome.desktop.screensaver ubuntu-lock-on-suspend false
-
-# Ensure changes persist across reboots
-cat <<EOF | tee /etc/udev/rules.d/99-disable-screensaver.rules
-# Disable screen blanking on boot
-ACTION=="add", SUBSYSTEM=="drm", RUN+="/usr/bin/xset s off"
-ACTION=="add", SUBSYSTEM=="drm", RUN+="/usr/bin/xset -dpms"
-ACTION=="add", SUBSYSTEM=="drm", RUN+="/usr/bin/xset s noblank"
+gsettings set org.gnome.desktop.screensaver lock-enabled false
+gsettings set org.gnome.desktop.screensaver idle-activation-enabled false
+gsettings set org.gnome.desktop.notifications show-banners false
+gsettings set org.gnome.desktop.notifications application-activate false
 EOF
 
-# Disable systemd sleep and suspend services
-systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+### --- 5. Clone Application ---
+echo "📦 Cloning MSI TimeClock..."
+git clone "$REPO_URL" "$INSTALL_DIR"
+chown -R "$USERNAME:$USERNAME" "$INSTALL_DIR"
 
-echo "All power-saving, screen blanking, and auto-locking features have been disabled."
-
-# --- System Update and Package Installation ---
-echo "Updating system and installing required packages..."
-apt update && apt upgrade -y
-apt install -y python3 python3-pip python3-venv python3-tk sqlite3 curl wget git network-manager v4l-utils
-
-# --- Clone and Install MSI TimeClock Application ---
-echo "Cloning MSI TimeClock application..."
-git clone https://github.com/Metro-Staff-Inc/MSIClock2025 /opt/msi-clock
-chown -R $USERNAME:$USERNAME /opt/msi-clock
-
-# --- Install Fonts ---
-echo "Installing required fonts..."
-mkdir -p /usr/local/share/fonts/msi-clock
-cp /opt/msi-clock/assets/fonts/*.ttf /usr/local/share/fonts/msi-clock/
-chmod 644 /usr/local/share/fonts/msi-clock/*
+### --- 6. Install Fonts ---
+echo "🔤 Installing fonts..."
+mkdir -p "$FONT_DIR"
+cp "$INSTALL_DIR/assets/fonts/"*.ttf "$FONT_DIR/"
+chmod 644 "$FONT_DIR"/*
 fc-cache -f -v
 
-# --- Set Up Python Virtual Environment ---
-echo "Setting up Python virtual environment..."
-python3 -m venv /opt/msi-clock/venv
-source /opt/msi-clock/venv/bin/activate
+### --- 7. Python Environment ---
+echo "🐍 Setting up Python virtual environment..."
+apt update
+apt install -y python3 python3-venv python3-pip python3-tk sqlite3 git curl wget network-manager v4l-utils
+
+python3 -m venv "$INSTALL_DIR/venv"
+source "$INSTALL_DIR/venv/bin/activate"
 pip install --upgrade pip
-pip install -r /opt/msi-clock/requirements.txt
+pip install -r "$INSTALL_DIR/requirements.txt"
 deactivate
-chown -R $USERNAME:$USERNAME /opt/msi-clock/venv
 
-# --- Configure MSI TimeClock Autostart (Desktop) ---
-echo "Configuring MSI TimeClock to autostart on user login..."
-sudo -u $USERNAME mkdir -p /home/$USERNAME/.config/autostart
-cat <<EOF > /home/$USERNAME/.config/autostart/msi-clock.desktop
+chown -R "$USERNAME:$USERNAME" "$INSTALL_DIR/venv"
+
+### --- 8. Autostart Entry ---
+echo "🚀 Creating autostart entry..."
+sudo -u "$USERNAME" mkdir -p "/home/$USERNAME/.config/autostart"
+cat <<EOF > "/home/$USERNAME/.config/autostart/msi-clock.desktop"
 [Desktop Entry]
 Type=Application
-Exec=bash -c 'cd /opt/msi-clock && /opt/msi-clock/venv/bin/python main.py'
+Exec=bash -c 'cd $INSTALL_DIR && $INSTALL_DIR/venv/bin/python main.py'
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
 Name=MSI Clock
-Path=/opt/msi-clock
-Icon=/opt/msi-clock/assets/people-dark-bg.png
+Path=$INSTALL_DIR
+Icon=$INSTALL_DIR/assets/people-dark-bg.png
 EOF
-chown $USERNAME:$USERNAME /home/$USERNAME/.config/autostart/msi-clock.desktop
+chown "$USERNAME:$USERNAME" "/home/$USERNAME/.config/autostart/msi-clock.desktop"
 
-# --- Create Desktop Launcher ---
-echo "Creating desktop launcher..."
-sudo -u $USERNAME mkdir -p /home/$USERNAME/Desktop
-cat <<EOF > /home/$USERNAME/Desktop/msi-clock.desktop
-[Desktop Entry]
-Type=Application
-Exec=bash -c 'cd /opt/msi-clock && /opt/msi-clock/venv/bin/python main.py'
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-Name=MSI Clock
-Path=/opt/msi-clock
-Icon=/opt/msi-clock/assets/people-dark-bg.png
-EOF
-chmod +x /home/$USERNAME/Desktop/msi-clock.desktop
-chown $USERNAME:$USERNAME /home/$USERNAME/Desktop/msi-clock.desktop
+sudo -u "$USERNAME" mkdir -p "/home/$USERNAME/Desktop"
+cp "/home/$USERNAME/.config/autostart/msi-clock.desktop" "/home/$USERNAME/Desktop/msi-clock.desktop"
+chmod +x "/home/$USERNAME/Desktop/msi-clock.desktop"
+chown "$USERNAME:$USERNAME" "/home/$USERNAME/Desktop/msi-clock.desktop"
 
-RUSTDESK_PASSWORD="12345678"
-
-echo "Installing RustDesk..."
-
-# Get the latest RustDesk version dynamically
+### --- 9. Install RustDesk ---
+echo "📡 Installing RustDesk..."
 LATEST_VERSION=$(curl -s https://api.github.com/repos/rustdesk/rustdesk/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 DEB_URL="https://github.com/rustdesk/rustdesk/releases/download/${LATEST_VERSION}/rustdesk-${LATEST_VERSION#v}-x86_64.deb"
-
-# Download and Install RustDesk
-wget -O /tmp/rustdesk.deb "$DEB_URL" || { echo "Failed to download RustDesk."; exit 1; }
+wget -O /tmp/rustdesk.deb "$DEB_URL"
 apt install -y /tmp/rustdesk.deb || apt --fix-broken install -y
 rm /tmp/rustdesk.deb
 
-echo "Configuring RustDesk for unattended access..."
-
-# Ensure the RustDesk config directory exists
-sudo -u $USERNAME mkdir -p /home/$USERNAME/.config/rustdesk
-chown -R $USERNAME:$USERNAME /home/$USERNAME/.config/rustdesk
-
-# Set the RustDesk password in the config file
-sudo -u $USERNAME bash -c "echo '{\"pswd_h\": \"$(echo -n $RUSTDESK_PASSWORD | sha256sum | awk '{print $1}')\"}' > /home/$USERNAME/.config/rustdesk/config.json"
-
-# Ensure proper permissions
-chmod 600 /home/$USERNAME/.config/rustdesk/config.json
-chown $USERNAME:$USERNAME /home/$USERNAME/.config/rustdesk/config.json
-
-# Set RustDesk settings for automatic display selection and no permission dialogs
-cat <<EOF > /home/$USERNAME/.config/rustdesk/settings.json
+CONFIG_DIR="/home/$USERNAME/.config/rustdesk"
+mkdir -p "$CONFIG_DIR"
+PASSWORD_HASH=$(echo -n "$RUSTDESK_PASSWORD" | sha256sum | awk '{print $1}')
+cat <<EOF > "$CONFIG_DIR/config.json"
+{
+  "pswd_h": "$PASSWORD_HASH"
+}
+EOF
+cat <<EOF > "$CONFIG_DIR/settings.json"
 {
   "selected_display": "all",
   "session_always_accept": true,
   "session_permission_dialog": false
 }
 EOF
+chown -R "$USERNAME:$USERNAME" "$CONFIG_DIR"
+chmod 600 "$CONFIG_DIR"/*.json
 
-# Set correct ownership for settings.json
-chown $USERNAME:$USERNAME /home/$USERNAME/.config/rustdesk/settings.json
-chmod 600 /home/$USERNAME/.config/rustdesk/settings.json
-
-echo "Configuring RustDesk to autostart on system boot..."
-
-# Enable RustDesk as a system service for persistent background operation
 cat <<EOF > /etc/systemd/system/rustdesk.service
 [Unit]
 Description=RustDesk Remote Desktop
@@ -198,57 +154,70 @@ After=network.target
 ExecStart=/usr/bin/rustdesk --headless
 User=$USERNAME
 Restart=always
-RestartSec=5s
+RestartSec=5
 Environment=DISPLAY=:0
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Reload systemd, enable and start RustDesk
 systemctl daemon-reload
 systemctl enable rustdesk.service
 systemctl restart rustdesk.service
 
-echo "RustDesk configured successfully for unattended access!"
+### --- 10. Install AnyDesk and Patch ---
+echo "📥 Installing AnyDesk..."
+wget -qO - https://keys.anydesk.com/repos/DEB-GPG-KEY | gpg --dearmor -o /usr/share/keyrings/anydesk.gpg
+echo "deb [signed-by=/usr/share/keyrings/anydesk.gpg] http://deb.anydesk.com/ all main" > /etc/apt/sources.list.d/anydesk.list
+apt update
+apt install -y anydesk
 
-# Save RustDesk connection details
-echo "RustDesk Password: $RUSTDESK_PASSWORD" > /root/rustdesk-info.txt
-chmod 600 /root/rustdesk-info.txt
+echo "🔧 Replacing AnyDesk with custom build..."
+mkdir -p "$TMP_DIR"
+wget -O "$TMP_DIR/custom.tar.gz" "$CUSTOM_ANYDESK_URL"
+tar -xzf "$TMP_DIR/custom.tar.gz" -C "$TMP_DIR"
+systemctl stop anydesk.service || true
+mv "$TMP_DIR/anydesk" /usr/bin/anydesk
+chmod +x /usr/bin/anydesk
+systemctl restart anydesk.service
+rm -rf "$TMP_DIR"
 
-# --- Configure Webcam Access (Udev Rules) ---
-echo "Configuring webcam access..."
+### --- 11. Webcam Access ---
+echo "🎥 Setting webcam access permissions..."
 cat <<EOF > /etc/udev/rules.d/99-webcam.rules
 SUBSYSTEM=="video4linux", GROUP="video", MODE="0666"
 EOF
-udevadm control --reload-rules && udevadm trigger
+udevadm control --reload-rules
+udevadm trigger
 
-# --- Disable Automatic Updates and MOTD ---
-echo "Disabling automatic updates and MOTD..."
-apt remove -y unattended-upgrades || true
-if [ -f /etc/pam.d/sshd ]; then
-    sed -i 's/\(\s*\)\(.*motd.*\)/#\1\2/' /etc/pam.d/sshd
+### --- 12. Disable Updates & MOTD (with error handling) ---
+echo "⚙️ Disabling automatic updates and MOTD..."
+if dpkg -l | grep -q unattended-upgrades; then
+    apt remove -y unattended-upgrades || echo "⚠️ Failed to remove unattended-upgrades."
+else
+    echo "ℹ️ Unattended-upgrades not installed, skipping."
 fi
-rm -f /etc/update-motd.d/*
 
-# --- Disable Automatic Suspend and Screen Blackout ---
-echo "Disabling automatic suspend and screen blackout..."
-gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
-gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
-gsettings set org.gnome.desktop.session idle-delay 0
-gsettings set org.gnome.desktop.screensaver lock-enabled false
-gsettings set org.gnome.desktop.screensaver idle-activation-enabled false
+if [ -d /etc/update-motd.d ]; then
+    rm -f /etc/update-motd.d/* || echo "⚠️ Failed to remove some MOTD scripts."
+else
+    echo "ℹ️ /etc/update-motd.d does not exist, skipping."
+fi
 
-# --- Disable Notifications ---
-echo "Disabling notifications..."
-gsettings set org.gnome.desktop.notifications show-banners false
-gsettings set org.gnome.desktop.notifications application-activate false
+if [ -f /etc/pam.d/sshd ]; then
+    sed -i 's/^\(.*motd.*\)/# \1/' /etc/pam.d/sshd || echo "⚠️ Failed to update /etc/pam.d/sshd."
+else
+    echo "ℹ️ /etc/pam.d/sshd not found, skipping PAM MOTD update."
+fi
 
-# --- Disable Wi-Fi Power Management ---
-echo "Disabling Wi-Fi power management..."
-sudo sed -i 's/^wifi.powersave = .*/wifi.powersave = 2/' /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf
+### --- 13. Disable Wi-Fi Powersave ---
+echo "📶 Disabling Wi-Fi power management..."
+sed -i 's/^wifi.powersave = .*/wifi.powersave = 2/' /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf || true
 
-echo "Installation complete."
-# --- Optional Reboot ---
-# Uncomment the next line to reboot automatically after installation.
+### --- 14. Done ---
+echo "✅ MSI TimeClock installation complete!"
+echo "📄 RustDesk password: $RUSTDESK_PASSWORD" > /root/rustdesk-info.txt
+chmod 600 /root/rustdesk-info.txt
+
+# Uncomment if auto-reboot is desired:
 # reboot
