@@ -36,7 +36,7 @@ systemctl daemon-reload
 
 ### --- 1. Remove Unwanted Applications ---
 echo "🧼 Removing default Ubuntu apps..."
-apt purge -y libreoffice-* thunderbird gnome-games gnome-calendar rhythmbox cheese aisleriot shotwell transmission-gtk simple-scan firefox snapd || true
+apt purge -y libreoffice-* thunderbird gnome-games gnome-calendar rhythmbox cheese aisleriot shotwell transmission-gtk simple-scan || true
 rm -rf /home/*/snap
 apt autoremove -y
 
