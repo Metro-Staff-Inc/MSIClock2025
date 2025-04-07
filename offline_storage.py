@@ -128,17 +128,21 @@ class OfflineStorage:
     def cleanup_old_records(self, retention_days: int) -> int:
         """Remove old records based on retention policy"""
         try:
+            from datetime import timedelta
             punches = self._load_punches()
             cutoff_date = datetime.now().replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
             
+            # Calculate cutoff date using timedelta
+            cutoff_date = cutoff_date - timedelta(days=retention_days)
+            
             # Filter out old records
             new_punches = [
                 p for p in punches
-                if (datetime.fromisoformat(p['createdAt']).replace(
+                if datetime.fromisoformat(p['createdAt']).replace(
                     hour=0, minute=0, second=0, microsecond=0
-                ) > cutoff_date.replace(day=cutoff_date.day - retention_days))
+                ) > cutoff_date
             ]
             
             deleted_count = len(punches) - len(new_punches)

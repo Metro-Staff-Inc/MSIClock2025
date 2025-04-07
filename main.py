@@ -438,21 +438,13 @@ class TimeClock:
             self.soap_client = SoapClient()
             if not self.soap_client.is_online():
                 error = self.soap_client.get_connection_error()
-                logging.warning(f"Starting in offline mode: {error}")
-                show_auto_warning(
-                    "Network Warning",
-                    "Starting in offline mode. Punches will be stored locally and synced when connection is restored."
-                )
+                logging.info(f"Starting in offline mode: {error}. Punches will be stored locally and synced when connection is restored.")
 
             self.camera_service = CameraService()
             
             # Test camera initialization
             if not self.camera_service.initialize():
-                logging.error("Failed to initialize camera")
-                show_auto_warning(
-                    "Warning",
-                    "Failed to initialize camera. Photo capture will be disabled."
-                )
+                logging.info("Failed to initialize camera - Photo capture will be disabled")
             
         except Exception as e:
             logging.error(f"Failed to initialize services: {e}")
@@ -537,19 +529,12 @@ class TimeClock:
             results = self.soap_client.sync_offline_punches()
             logging.debug(f"Offline sync results: {results}")
             
-            # Show success message if any punches were synced
+            # Log sync results instead of showing popups
             if results.get('synced', 0) > 0:
-                show_auto_info(
-                    "Sync Complete",
-                    f"Successfully synced {results['synced']} offline punches."
-                )
+                logger.info(f"Successfully synced {results['synced']} offline punches")
             
-            # Show warning if any failed
             if results.get('failed', 0) > 0:
-                show_auto_warning(
-                    "Sync Warning",
-                    f"Failed to sync {results['failed']} offline punches. Will retry later."
-                )
+                logger.info(f"Failed to sync {results['failed']} offline punches - will retry later")
         else:
             logging.debug("Skipping offline sync - system is offline")
 

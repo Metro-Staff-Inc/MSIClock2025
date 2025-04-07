@@ -604,13 +604,23 @@ class TimeClockUI(customtkinter.CTkFrame):
     def reset_ui(self):
         """Reset UI to initial state"""
         try:
+            # Re-enable ID entry and manual entry button
+            self.id_entry.configure(state="normal")
+            self.manual_entry_button.configure(state="normal")
+            
+            # Clear any existing ID
+            self.employee_id.set("")
+            
+            # Reset status
             self.set_status("Please scan your ID", "Por favor pase su tarjeta", StatusColors.NORMAL)
+            
             def set_focus():
                 try:
                     self.id_entry.focus_set()
                 except Exception as e:
                     logger.error(f"Error setting focus: {e}")
             self._safe_after(100, set_focus)
+            
         except Exception as e:
             logger.error(f"Error resetting UI: {e}")
             # Emergency recovery
@@ -618,6 +628,8 @@ class TimeClockUI(customtkinter.CTkFrame):
                 self.employee_id.set("")
                 self.status_text.set("Ready")
                 self.status_text_es.set("Listo")
+                self.id_entry.configure(state="normal")
+                self.manual_entry_button.configure(state="normal")
             except Exception as e2:
                 logger.error(f"Failed emergency UI reset: {e2}")
 
@@ -665,6 +677,10 @@ class TimeClockUI(customtkinter.CTkFrame):
         if len(raw_employee_id) >= 2 and raw_employee_id[:2].isalpha():
             image_employee_id = raw_employee_id[2:]
             logger.info(f"Stripped prefix from ID for image handling: {raw_employee_id} -> {image_employee_id}")
+        
+        # Disable UI elements to prevent new scans during processing
+        self.id_entry.configure(state="disabled")
+        self.manual_entry_button.configure(state="disabled")
         
         # Clear entry field immediately
         self.employee_id.set("")
